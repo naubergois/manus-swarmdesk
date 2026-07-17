@@ -181,10 +181,8 @@ async def reset_board(*, reseed_demo: bool = True) -> dict:
     # Rebuild an empty store (also reconnects Mongo collections if configured).
     await init_store()
 
-    seeded = False
-    if reseed_demo:
-        result = await seed_if_empty()
-        seeded = bool(result.get("seeded", True))
+    result = await seed_if_empty(include_demo_cards=reseed_demo)
+    seeded = reseed_demo and bool(result.get("seeded", True))
 
     logger.info("Board reset: stopped=%s reseed_demo=%s", stopped, reseed_demo)
     return {"ok": True, "runtimes_stopped": stopped, "reseeded": seeded}

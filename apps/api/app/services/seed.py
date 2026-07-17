@@ -544,7 +544,12 @@ def build_example_agents(target: int = 250) -> list[AgentCatalogItem]:
 MVP_AGENTS = CORE_AGENTS + build_example_agents(250)
 
 
-async def seed_if_empty() -> dict:
+async def seed_if_empty(*, include_demo_cards: bool = False) -> dict:
+    """Seed the base project, board, and agent catalog.
+
+    The board starts empty by default; demo cards are only created when
+    ``include_demo_cards`` is True (e.g. board reset with demo regeneration).
+    """
     store = get_store()
     existing = await store.list("projects")
     if existing:
@@ -572,6 +577,16 @@ async def seed_if_empty() -> dict:
 
     for agent in MVP_AGENTS:
         await store.upsert("agents", agent)
+
+    if include_demo_cards:
+        await _seed_demo_cards(project, board)
+
+    return {"project_id": project.id, "board_id": board.id, "seeded": True}
+
+
+async def _seed_demo_cards(project: Project, board: KanbanBoard) -> None:
+    """Create the demo cards (Todo Mini App, Notes Pad, etc.) and related data."""
+    store = get_store()
 
     demo_cards = [
         TaskCard(
@@ -893,5 +908,3 @@ async def seed_if_empty() -> dict:
             comment="Scope ready: approve to let the robot swarm build and deploy the mini-app.",
         ),
     )
-
-    return {"project_id": project.id, "board_id": board.id, "seeded": True}
