@@ -12,8 +12,12 @@ from pathlib import Path
 from app.agents.schemas import AppFile, ImplementationResult
 from app.models.contracts import TaskCard
 
-ROOT = Path(__file__).resolve().parents[2]
-WORKSPACES = ROOT / "workspaces"
+API_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = API_ROOT.parents[1]
+# Keep generated applications outside ``apps/api``. Uvicorn watches that
+# directory in development, and generated Python files used to trigger a
+# reload that erased the in-memory board and cancelled the running swarm.
+WORKSPACES = REPO_ROOT / ".swarmdesk" / "workspaces"
 
 
 @dataclass

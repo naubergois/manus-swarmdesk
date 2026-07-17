@@ -116,10 +116,10 @@ export function BoardChatPanel({
         type="button"
         onClick={onToggle}
         className="flex h-full w-10 shrink-0 flex-col items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white text-[10px] font-bold text-slate-500 shadow-sm transition hover:border-blue-300 hover:text-blue-600"
-        title="Abrir chat A2A dos agentes"
+        title="Abrir painel ao vivo do gestor"
       >
-        <span className="text-lg">💬</span>
-        <span className="[writing-mode:vertical-rl] rotate-180">A2A</span>
+        <span className="text-lg">🤖</span>
+        <span className="[writing-mode:vertical-rl] rotate-180">Nova</span>
         {messages.length ? (
           <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[9px] text-white">
             {messages.length > 99 ? "99+" : messages.length}
@@ -133,8 +133,8 @@ export function BoardChatPanel({
     <aside className="flex h-full w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 shadow-sm lg:w-80">
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2">
         <div className="min-w-0">
-          <h2 className="text-sm font-extrabold text-slate-900">Chat A2A</h2>
-          <p className="text-[10px] text-slate-500">Agentes narrando o que fazem no board</p>
+          <h2 className="text-sm font-extrabold text-slate-900">Nova · Board live</h2>
+          <p className="text-[10px] text-slate-500">Gestor e agentes narrando o que acontece</p>
         </div>
         <button
           type="button"

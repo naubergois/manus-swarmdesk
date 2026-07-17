@@ -118,4 +118,19 @@ async def transition_card(card_id: str, request: TransitionRequest) -> TaskCard:
         input_data={"reason": request.reason},
     )
     await store.insert("audit_events", event)
+
+    # Nova (gestor) narrates every move so the board speaks visually.
+    from app.services import project_manager
+
+    try:
+        await project_manager.announce_transition(
+            card,
+            previous,
+            target,
+            actor=request.actor,
+            reason=request.reason,
+        )
+    except Exception:
+        pass
+
     return card

@@ -277,6 +277,29 @@ export interface AgentBoardMessage {
   created_at: string;
 }
 
+export interface BoardLaneCount {
+  id: string;
+  label: string;
+  count: number;
+}
+
+export interface BoardLiveState {
+  board_id: string | null;
+  headline: string;
+  briefing: string;
+  mood: "idle" | "busy" | "blocked" | "celebrate" | string;
+  focus_card_id: string | null;
+  focus_card_title: string | null;
+  speaking_agent_id: string;
+  lane_counts: BoardLaneCount[];
+  building: number;
+  blocked: number;
+  awaiting_approval: number;
+  live_apps: number;
+  recent: AgentBoardMessage[];
+  updated_at: string;
+}
+
 export interface ChatResponse {
   reply: string;
   card: TaskCard | null;

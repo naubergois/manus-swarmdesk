@@ -1,6 +1,7 @@
 import type {
   AgentBoardMessage,
   AgentCatalogItem,
+  BoardLiveState,
   CardDetail,
   ChatMessage,
   ChatResponse,
@@ -30,6 +31,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       detail = body.detail ?? JSON.stringify(body);
     } catch {
       /* ignore */
+    }
+    if (res.status === 502 && (!detail || detail === "Bad Gateway")) {
+      detail =
+        "API indisponível (Bad Gateway). O backend reiniciou ou caiu — aguarde alguns segundos e tente de novo.";
     }
     throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
   }
@@ -111,6 +116,13 @@ export const api = {
       if (params?.limit) q.set("limit", String(params.limit));
       const qs = q.toString();
       return request<AgentBoardMessage[]>(`/board-chat/messages${qs ? `?${qs}` : ""}`);
+    },
+    live: (params?: { board_id?: string; limit?: number }) => {
+      const q = new URLSearchParams();
+      if (params?.board_id) q.set("board_id", params.board_id);
+      if (params?.limit) q.set("limit", String(params.limit));
+      const qs = q.toString();
+      return request<BoardLiveState>(`/board-chat/live${qs ? `?${qs}` : ""}`);
     },
   },
   approvals: {

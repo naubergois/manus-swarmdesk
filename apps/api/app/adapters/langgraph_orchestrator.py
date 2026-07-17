@@ -53,6 +53,12 @@ class LangGraphOrchestrator:
 
     async def receive_demand(self, card: TaskCard) -> TaskCard:
         await self._audit(card, "receive_demand", None, KanbanColumn.ENTRADA.value)
+        from app.services import project_manager
+
+        try:
+            await project_manager.announce_intake(card)
+        except Exception:
+            logger.exception("Nova intake announce failed for %s", card.id)
         result = await self._graph.ainvoke({"card": card.model_dump(mode="json")})
         if result.get("error"):
             raise RuntimeError(result["error"])

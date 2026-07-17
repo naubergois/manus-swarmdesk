@@ -289,6 +289,16 @@ class RufloSwarmManager:
                 card.column.value,
                 {"mission_id": mission.id, "previous_state": previous.value},
             )
+            from app.services import project_manager
+
+            try:
+                await project_manager.announce(
+                    card,
+                    f"⏹️ Enxame parado. «{card.title}» foi para cancelado — board atualizado.",
+                    pipeline_step="pm_swarm_stop",
+                )
+            except Exception:
+                logger.exception("Nova swarm-stop announce failed")
 
         return mission
 
@@ -443,6 +453,19 @@ class RufloSwarmManager:
             message_type="status",
             pipeline_step="start_swarm",
         )
+        from app.services import project_manager
+
+        try:
+            await project_manager.announce(
+                card,
+                (
+                    f"🚀 Enxame em marcha para «{card.title}». "
+                    "Vou acompanhar cada coluna e narrar o progresso no board."
+                ),
+                pipeline_step="pm_swarm_start",
+            )
+        except Exception:
+            logger.exception("Nova swarm-start announce failed")
         await self._audit(
             card,
             "start_swarm",
@@ -1036,6 +1059,20 @@ class RufloSwarmManager:
             message_type="status",
             pipeline_step="prepare_delivery",
         )
+        from app.services import project_manager
+
+        try:
+            await project_manager.announce(
+                card,
+                (
+                    f"✅ «{card.title}» está pronto para entrega. "
+                    "Revise o preview no dock e aprove para concluir."
+                ),
+                message_type="question",
+                pipeline_step="pm_delivery",
+            )
+        except Exception:
+            logger.exception("Nova delivery announce failed")
         return {"card": card.model_dump(mode="json"), "mission": mission.model_dump(mode="json")}
 
     async def _block_with_ticket(self, card: TaskCard, reason: str) -> TaskCard:

@@ -169,6 +169,51 @@ select {
   transform-origin: center bottom;
 }
 
+.nova-speak-pulse {
+  animation: novaSpeakPulse 2s ease-in-out infinite;
+}
+
+@keyframes novaSpeakPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
+  }
+}
+
+.nova-focus-card {
+  animation: novaFocusGlow 1.8s ease-in-out infinite;
+}
+
+@keyframes novaFocusGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(37, 99, 235, 0);
+  }
+}
+
+.nova-ticker-track {
+  mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+}
+
+.nova-ticker-slide {
+  animation: novaTickerSlide 28s linear infinite;
+}
+
+@keyframes novaTickerSlide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-40%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .agent-celebrate {
     animation: agentPulse 1.2s ease-in-out infinite;
@@ -176,7 +221,10 @@ select {
 
   .agent-row-spreading,
   .board-card-enter,
-  .board-subcard {
+  .board-subcard,
+  .nova-speak-pulse,
+  .nova-focus-card,
+  .nova-ticker-slide {
     animation: none;
   }
 }

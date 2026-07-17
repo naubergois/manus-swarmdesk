@@ -315,14 +315,49 @@ async def decide_approval(approval_id: str, action: ApprovalAction) -> HumanAppr
                 raise
             except Exception as exc:
                 raise HTTPException(status_code=502, detail=f"Falha ao liberar o enxame: {exc}") from exc
+            from app.services import project_manager
+
+            try:
+                await project_manager.announce(
+                    card,
+                    (
+                        f"👍 Escopo de «{card.title}» aprovado. "
+                        "Enxame liberado — clique em Start quando quiser que eu ponha os robôs a trabalhar."
+                    ),
+                    message_type="result",
+                    pipeline_step="pm_scope_approved",
+                )
+            except Exception:
+                pass
         elif approval.type == ApprovalType.ENTREGA:
             card.column = KanbanColumn.CONCLUIDO
             card.updated_at = datetime.utcnow()
             await store.upsert("task_cards", card)
+            from app.services import project_manager
+
+            try:
+                await project_manager.announce(
+                    card,
+                    f"🎉 Entrega de «{card.title}» aprovada — cartão concluído e app no dock live.",
+                    message_type="result",
+                    pipeline_step="pm_delivery_approved",
+                )
+            except Exception:
+                pass
     elif action.decision in {ApprovalDecision.REPROVADO, ApprovalDecision.EDITAR}:
         card.column = KanbanColumn.REFINAMENTO
         card.updated_at = datetime.utcnow()
         await store.upsert("task_cards", card)
+        from app.services import project_manager
+
+        try:
+            await project_manager.announce(
+                card,
+                f"↩️ «{card.title}» voltou para refinamento — vou reorganizar o plano com a equipe.",
+                pipeline_step="pm_scope_rejected",
+            )
+        except Exception:
+            pass
 
     return approval
 

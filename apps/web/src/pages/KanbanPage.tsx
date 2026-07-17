@@ -15,6 +15,7 @@ import { Link } from "react-router-dom";
 import { AGENT_ROBOTS, SOFTWARE_TEMPLATES, agentVisual } from "../agents";
 import { api } from "../api/client";
 import { BoardChatPanel } from "../components/BoardChatPanel";
+import { NovaLiveNarrator } from "../components/NovaLiveNarrator";
 import { Badge, Button, PRIORITY_LABEL, priorityTone } from "../components/ui";
 import { playRobotCheer } from "../lib/robotCheer";
 import { useAppStore } from "../store";
@@ -27,6 +28,7 @@ import {
   type BoardLane,
   type BoardLaneId,
   type AgentBoardMessage,
+  type BoardLiveState,
   type KanbanColumn,
   type TaskCard,
 } from "../types";
@@ -107,6 +109,7 @@ function DroppableLane({
   cards,
   allCards,
   selectedIds,
+  focusCardId,
   celebrating,
   approvingId,
   onToggleSelect,
@@ -117,6 +120,7 @@ function DroppableLane({
   cards: TaskCard[];
   allCards: TaskCard[];
   selectedIds: Set<string>;
+  focusCardId: string | null;
   celebrating: boolean;
   approvingId: string | null;
   onToggleSelect: (id: string) => void;
@@ -147,6 +151,7 @@ function DroppableLane({
             card={card}
             allCards={allCards}
             selected={selectedIds.has(card.id)}
+            focused={focusCardId === card.id}
             celebrating={celebrating}
             approving={approvingId === card.id}
             onToggleSelect={onToggleSelect}
@@ -163,6 +168,7 @@ function DraggableCard({
   card,
   allCards,
   selected,
+  focused,
   celebrating,
   approving,
   onToggleSelect,
@@ -172,6 +178,7 @@ function DraggableCard({
   card: TaskCard;
   allCards: TaskCard[];
   selected: boolean;
+  focused: boolean;
   celebrating: boolean;
   approving: boolean;
   onToggleSelect: (id: string) => void;
@@ -191,6 +198,7 @@ function DraggableCard({
         card={card}
         allCards={allCards}
         selected={selected}
+        focused={focused}
         celebrating={celebrating}
         approving={approving}
         onToggleSelect={onToggleSelect}
@@ -206,6 +214,7 @@ function CardBody({
   allCards = [],
   compact = false,
   selected = false,
+  focused = false,
   celebrating = false,
   approving = false,
   onToggleSelect,
@@ -216,6 +225,7 @@ function CardBody({
   allCards?: TaskCard[];
   compact?: boolean;
   selected?: boolean;
+  focused?: boolean;
   celebrating?: boolean;
   approving?: boolean;
   onToggleSelect?: (id: string) => void;
@@ -248,9 +258,11 @@ function CardBody({
       } ${
         selected
           ? "border-rose-300 ring-2 ring-rose-300"
-          : kind === "epic"
-            ? "border-indigo-200/90 hover:border-indigo-300"
-            : "border-slate-200/80 hover:border-blue-200"
+          : focused
+            ? "nova-focus-card border-blue-400 ring-2 ring-blue-400/70"
+            : kind === "epic"
+              ? "border-indigo-200/90 hover:border-indigo-300"
+              : "border-slate-200/80 hover:border-blue-200"
       }`}
     >
       <div className="mb-1.5 flex flex-wrap items-center gap-1">
@@ -542,6 +554,8 @@ export function KanbanPage() {
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(true);
   const [a2aMessages, setA2aMessages] = useState<AgentBoardMessage[]>([]);
+  const [boardLive, setBoardLive] = useState<BoardLiveState | null>(null);
+  const [focusCardId, setFocusCardId] = useState<string | null>(null);
   const [chatFilterCardId, setChatFilterCardId] = useState<string | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -630,12 +644,22 @@ export function KanbanPage() {
   async function refreshA2aMessages() {
     if (!boardId) {
       setA2aMessages([]);
+      setBoardLive(null);
       return;
     }
     setChatLoading(true);
     try {
-      const msgs = await api.boardChat.messages({ board_id: boardId, limit: 120 });
+      const [msgs, live] = await Promise.all([
+        api.boardChat.messages({ board_id: boardId, limit: 120 }),
+        api.boardChat.live({ board_id: boardId, limit: 24 }),
+      ]);
       setA2aMessages(msgs);
+      setBoardLive(live);
+      if (live.focus_card_id && (live.mood === "busy" || live.mood === "blocked")) {
+        setFocusCardId(live.focus_card_id);
+      } else if (live.focus_card_id) {
+        setFocusCardId((prev) => prev ?? live.focus_card_id);
+      }
     } catch {
       /* keep last messages on transient errors */
     } finally {
@@ -849,7 +873,7 @@ export function KanbanPage() {
             {liveApps.length ? <Badge tone="success">{liveApps.length} live</Badge> : null}
           </div>
           <p className="mt-0.5 hidden text-xs text-slate-500 sm:block">
-            Similar stages merged. Chip on each card shows the detailed status.
+            Nova gerencia o fluxo e narra cada movimento. Chip no cartão = status detalhado.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -930,21 +954,41 @@ export function KanbanPage() {
         </div>
       </header>
 
+      <NovaLiveNarrator
+        live={boardLive}
+        onFocusCard={(id) => {
+          setFocusCardId(id);
+          if (id) setChatFilterCardId(id);
+        }}
+      />
+
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <div className="flex max-w-full gap-1.5 overflow-x-auto">
           {coreAgents.slice(0, 6).map((agent, i) => (
             <div
               key={agent.id}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1"
+              className={`flex shrink-0 items-center gap-1.5 rounded-lg border bg-white px-2 py-1 ${
+                agent.id === "supervisor"
+                  ? "border-blue-400 ring-1 ring-blue-300"
+                  : "border-slate-200"
+              }`}
               title={agent.blurb}
             >
               <AgentAvatar
                 id={agent.id}
                 size="sm"
+                working={agent.id === "supervisor" && (boardLive?.mood === "busy" || isBusy)}
                 celebrating={celebrating}
                 motionDelayMs={i * 80}
               />
-              <span className="text-[10px] font-bold text-slate-700">{agent.name}</span>
+              <div className="leading-tight">
+                <span className="block text-[10px] font-bold text-slate-700">{agent.name}</span>
+                {agent.id === "supervisor" ? (
+                  <span className="block text-[8px] font-semibold uppercase tracking-wide text-blue-600">
+                    gestor
+                  </span>
+                ) : null}
+              </div>
             </div>
           ))}
           <Link
@@ -986,6 +1030,7 @@ export function KanbanPage() {
                 cards={byLane[lane.id]}
                 allCards={cards}
                 selectedIds={selectedIds}
+                focusCardId={focusCardId}
                 celebrating={celebrating}
                 approvingId={approvingId}
                 onToggleSelect={toggleSelect}

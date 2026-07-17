@@ -30,9 +30,12 @@ CORE_AGENTS = [
         id="supervisor",
         name="Nova",
         role="supervisor",
-        description="Robot supervisor that owns the delivery flow end-to-end",
+        description=(
+            "Gestor de projetos do board: move o fluxo, pede aprovações "
+            "e narra visualmente tudo que acontece no Kanban"
+        ),
         preferred_model="grok-3-mini",
-        tools=["chat", "kanban", "approvals"],
+        tools=["chat", "kanban", "approvals", "board_briefing"],
         autonomy_level=AutonomyLevel.OPERACAO,
         success_rate=0.94,
     ),
@@ -794,6 +797,19 @@ async def _seed_demo_cards(project: Project, board: KanbanBoard) -> None:
     now = datetime.utcnow()
     demo_a2a = [
         AgentBoardMessage(
+            id="a2a_seed_0",
+            board_id=board.id,
+            card_id="card_seed_1",
+            from_agent_id="supervisor",
+            content=(
+                "Olá — sou a Nova, gestora deste board. "
+                "Vou narrar cada movimento dos robôs e apontar o que precisa de você."
+            ),
+            message_type="status",
+            pipeline_step="pm_intro",
+            created_at=now - timedelta(minutes=22),
+        ),
+        AgentBoardMessage(
             id="a2a_seed_1",
             board_id=board.id,
             card_id="card_seed_1",
@@ -822,6 +838,19 @@ async def _seed_demo_cards(project: Project, board: KanbanBoard) -> None:
             message_type="status",
             pipeline_step="design_swarm",
             created_at=now - timedelta(minutes=12),
+        ),
+        AgentBoardMessage(
+            id="a2a_seed_pm",
+            board_id=board.id,
+            card_id="card_seed_1",
+            from_agent_id="supervisor",
+            content=(
+                "Board sob controle: Todo Live no enxame, Bookmark Board aguardando aprovação, "
+                "Notes Pad bloqueado. Clique em Start no Todo Live para eu colocar o enxame em marcha."
+            ),
+            message_type="status",
+            pipeline_step="pm_briefing",
+            created_at=now - timedelta(minutes=8),
         ),
         AgentBoardMessage(
             id="a2a_seed_4",

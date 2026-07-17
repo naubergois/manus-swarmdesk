@@ -8,7 +8,7 @@ export type AgentVisual = {
 };
 
 const ROLE_META: Record<string, { label: string; emoji: string; color: string }> = {
-  supervisor: { label: "Supervisor", emoji: "🤖", color: "#2563eb" },
+  supervisor: { label: "Gestor de Projetos", emoji: "🤖", color: "#2563eb" },
   triagem: { label: "Triage", emoji: "🛰️", color: "#0891b2" },
   requisitos: { label: "Requirements", emoji: "📋", color: "#7c3aed" },
   planejador: { label: "Planner", emoji: "🗺️", color: "#0ea5e9" },
@@ -56,10 +56,10 @@ export const AGENT_ROBOTS: AgentVisual[] = [
   {
     id: "supervisor",
     name: "Nova",
-    role: "Supervisor",
+    role: "Gestor de Projetos",
     emoji: "🤖",
     color: "#2563eb",
-    blurb: "Owns the delivery flow end-to-end",
+    blurb: "Gerencia o board e narra visualmente tudo que acontece",
   },
   {
     id: "triagem",
