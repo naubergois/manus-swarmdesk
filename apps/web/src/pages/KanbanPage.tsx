@@ -15,6 +15,7 @@ import { Link } from "react-router-dom";
 import { AGENT_ROBOTS, SOFTWARE_TEMPLATES, agentVisual } from "../agents";
 import { api } from "../api/client";
 import { Badge, Button, PRIORITY_LABEL, priorityTone } from "../components/ui";
+import { playRobotCheer } from "../lib/robotCheer";
 import { useAppStore } from "../store";
 import {
   BOARD_LANES,
@@ -39,6 +40,15 @@ const WORKING_COLUMNS = new Set<KanbanColumn>([
 
 const RUNNING_SWARM_STATUSES = ["running", "coordinating", "executing"];
 
+const SWARM_CARD_COLUMNS = new Set<KanbanColumn>([
+  "pronto_enxame",
+  "em_execucao",
+  "em_revisao",
+  "em_testes",
+  "bloqueado",
+  "aguardando_aprovacao",
+]);
+
 /** Mirrors backend ALLOWED transitions for smarter lane drops. */
 const ALLOWED: Partial<Record<KanbanColumn, KanbanColumn[]>> = {
   entrada: ["triagem", "cancelado"],
@@ -59,19 +69,32 @@ const ALLOWED: Partial<Record<KanbanColumn, KanbanColumn[]>> = {
 function AgentAvatar({
   id,
   working = false,
+  celebrating = false,
+  celebrateDelayMs = 0,
   size = "md",
 }: {
   id: string;
   working?: boolean;
+  celebrating?: boolean;
+  celebrateDelayMs?: number;
   size?: "sm" | "md";
 }) {
   const agent = agentVisual(id);
   const dim = size === "sm" ? "h-6 w-6 text-xs" : "h-8 w-8 text-sm";
+  const motion = celebrating
+    ? "agent-celebrate"
+    : working
+      ? "agent-working"
+      : "agent-float";
   return (
     <div
       title={`${agent.name} · ${agent.role}`}
-      className={`${dim} ${working ? "agent-working" : "agent-float"} inline-flex items-center justify-center rounded-full border border-white text-center shadow-sm`}
-      style={{ background: `${agent.color}22`, color: agent.color }}
+      className={`${dim} ${motion} inline-flex items-center justify-center rounded-full border border-white text-center shadow-sm`}
+      style={{
+        background: `${agent.color}22`,
+        color: agent.color,
+        animationDelay: celebrating ? `${celebrateDelayMs}ms` : undefined,
+      }}
     >
       <span aria-hidden>{agent.emoji}</span>
     </div>
@@ -83,6 +106,7 @@ function DroppableLane({
   cards,
   allCards,
   selectedIds,
+  celebrating,
   onToggleSelect,
   onDelete,
 }: {
@@ -90,6 +114,7 @@ function DroppableLane({
   cards: TaskCard[];
   allCards: TaskCard[];
   selectedIds: Set<string>;
+  celebrating: boolean;
   onToggleSelect: (id: string) => void;
   onDelete: (card: TaskCard) => void;
 }) {
@@ -117,6 +142,7 @@ function DroppableLane({
             card={card}
             allCards={allCards}
             selected={selectedIds.has(card.id)}
+            celebrating={celebrating}
             onToggleSelect={onToggleSelect}
             onDelete={onDelete}
           />
@@ -130,12 +156,14 @@ function DraggableCard({
   card,
   allCards,
   selected,
+  celebrating,
   onToggleSelect,
   onDelete,
 }: {
   card: TaskCard;
   allCards: TaskCard[];
   selected: boolean;
+  celebrating: boolean;
   onToggleSelect: (id: string) => void;
   onDelete: (card: TaskCard) => void;
 }) {
@@ -152,6 +180,7 @@ function DraggableCard({
         card={card}
         allCards={allCards}
         selected={selected}
+        celebrating={celebrating}
         onToggleSelect={onToggleSelect}
         onDelete={onDelete}
       />
@@ -164,6 +193,7 @@ function CardBody({
   allCards = [],
   compact = false,
   selected = false,
+  celebrating = false,
   onToggleSelect,
   onDelete,
 }: {
@@ -171,6 +201,7 @@ function CardBody({
   allCards?: TaskCard[];
   compact?: boolean;
   selected?: boolean;
+  celebrating?: boolean;
   onToggleSelect?: (id: string) => void;
   onDelete?: (card: TaskCard) => void;
 }) {
@@ -243,8 +274,15 @@ function CardBody({
       {agents.length ? (
         <div className="mt-2.5 flex items-center justify-between gap-2">
           <div className="flex -space-x-1.5">
-            {agents.slice(0, 4).map((id) => (
-              <AgentAvatar key={id} id={id} working={working} size="sm" />
+            {agents.slice(0, 4).map((id, i) => (
+              <AgentAvatar
+                key={id}
+                id={id}
+                working={working}
+                celebrating={celebrating}
+                celebrateDelayMs={i * 70}
+                size="sm"
+              />
             ))}
           </div>
           {working ? (
@@ -352,7 +390,32 @@ export function KanbanPage() {
   const [deleteTarget, setDeleteTarget] = useState<TaskCard[] | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [swarmBusy, setSwarmBusy] = useState<"start" | "stop" | null>(null);
+  const [celebrating, setCelebrating] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
+  useEffect(() => {
+    if (!celebrating) return;
+    const timer = window.setTimeout(() => setCelebrating(false), 2800);
+    return () => window.clearTimeout(timer);
+  }, [celebrating]);
+
+  const SWARM_CARD_COLUMNS = new Set<KanbanColumn>([
+    "pronto_enxame",
+    "em_execucao",
+    "em_revisao",
+    "em_testes",
+    "bloqueado",
+    "aguardando_aprovacao",
+  ]);
+
+  const SWARM_CARD_COLUMNS = new Set<KanbanColumn>([
+    "pronto_enxame",
+    "em_execucao",
+    "em_revisao",
+    "em_testes",
+    "bloqueado",
+    "aguardando_aprovacao",
+  ]);
 
   const activeMission = useMemo(() => {
     const running = missions.find((m) => RUNNING_SWARM_STATUSES.includes(m.status));
@@ -370,12 +433,31 @@ export function KanbanPage() {
     );
   }, [missions, cards]);
 
+  const swarmTargetCard = useMemo(() => {
+    if (activeMission) {
+      const linked = cards.find((c) => c.id === activeMission.card_id);
+      if (linked) return linked;
+    }
+    return (
+      cards.find(
+        (c) =>
+          (c.kind ?? (c.parent_id ? "work" : "epic")) === "epic" &&
+          SWARM_CARD_COLUMNS.has(c.column),
+      ) ?? null
+    );
+  }, [activeMission, cards]);
+
   const canStopSwarm = activeMission
     ? RUNNING_SWARM_STATUSES.includes(activeMission.status)
-    : false;
+    : Boolean(
+        swarmTargetCard &&
+          ["pronto_enxame", "em_execucao", "em_revisao", "em_testes"].includes(
+            swarmTargetCard.column,
+          ),
+      );
   const canStartSwarm = activeMission
     ? !RUNNING_SWARM_STATUSES.includes(activeMission.status)
-    : false;
+    : Boolean(swarmTargetCard);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -540,18 +622,22 @@ export function KanbanPage() {
   }
 
   async function runSwarmAction(action: "start" | "stop") {
-    if (!activeMission) return;
+    if (!swarmTargetCard && !activeMission) return;
     if (action === "stop" && !canStopSwarm) return;
     if (action === "start" && !canStartSwarm) return;
 
     setSwarmBusy(action);
     try {
       if (action === "stop") {
-        await api.swarm.stop(activeMission.id);
+        if (swarmTargetCard) await api.swarm.stopCard(swarmTargetCard.id);
+        else if (activeMission) await api.swarm.stop(activeMission.id);
         setToast("Enxame parado");
       } else {
-        await api.swarm.start(activeMission.id);
-        setToast("Enxame iniciado");
+        if (swarmTargetCard) await api.swarm.startCard(swarmTargetCard.id);
+        else if (activeMission) await api.swarm.start(activeMission.id);
+        setCelebrating(true);
+        playRobotCheer();
+        setToast("Enxame iniciado — robôs em festa!");
       }
       await refreshAll();
     } catch (err) {
@@ -588,17 +674,17 @@ export function KanbanPage() {
           <div className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 shadow-sm">
             {building} building · {liveApps.length} live
           </div>
-          {activeMission ? (
+          {swarmTargetCard || activeMission ? (
             <div className="flex items-center gap-1">
               <Badge tone={canStopSwarm ? "success" : "neutral"}>
-                Swarm {activeMission.status}
+                Swarm {activeMission?.status ?? swarmTargetCard?.column ?? "ready"}
               </Badge>
               <Button
                 variant="soft"
                 className="!px-2.5 !py-1.5 text-xs"
                 disabled={!canStartSwarm || swarmBusy !== null}
                 onClick={() => void runSwarmAction("start")}
-                title={`Start swarm · ${activeMission.objective}`}
+                title={`Start swarm · ${activeMission?.objective ?? swarmTargetCard?.title ?? ""}`}
               >
                 {swarmBusy === "start" ? "..." : "Start"}
               </Button>
@@ -607,12 +693,31 @@ export function KanbanPage() {
                 className="!px-2.5 !py-1.5 text-xs"
                 disabled={!canStopSwarm || swarmBusy !== null}
                 onClick={() => void runSwarmAction("stop")}
-                title={`Stop swarm · ${activeMission.objective}`}
+                title={`Stop swarm · ${activeMission?.objective ?? swarmTargetCard?.title ?? ""}`}
               >
                 {swarmBusy === "stop" ? "..." : "Stop"}
               </Button>
             </div>
-          ) : null}
+          ) : (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="soft"
+                className="!px-2.5 !py-1.5 text-xs"
+                disabled
+                title="Nenhum card elegível para o enxame"
+              >
+                Start
+              </Button>
+              <Button
+                variant="danger"
+                className="!px-2.5 !py-1.5 text-xs"
+                disabled
+                title="Nenhuma missão ativa"
+              >
+                Stop
+              </Button>
+            </div>
+          )}
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -638,13 +743,18 @@ export function KanbanPage() {
 
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <div className="flex max-w-full gap-1.5 overflow-x-auto">
-          {coreAgents.slice(0, 6).map((agent) => (
+          {coreAgents.slice(0, 6).map((agent, i) => (
             <div
               key={agent.id}
               className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1"
               title={agent.blurb}
             >
-              <AgentAvatar id={agent.id} size="sm" />
+              <AgentAvatar
+                id={agent.id}
+                size="sm"
+                celebrating={celebrating}
+                celebrateDelayMs={i * 80}
+              />
               <span className="text-[10px] font-bold text-slate-700">{agent.name}</span>
             </div>
           ))}
@@ -686,6 +796,7 @@ export function KanbanPage() {
               cards={byLane[lane.id]}
               allCards={cards}
               selectedIds={selectedIds}
+              celebrating={celebrating}
               onToggleSelect={toggleSelect}
               onDelete={(card) => setDeleteTarget([card])}
             />

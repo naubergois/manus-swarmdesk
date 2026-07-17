@@ -255,6 +255,65 @@ class RufloSwarmManager:
 
         return mission
 
+    async def _latest_mission_for_card(self, card_id: str) -> SwarmMission | None:
+        store = get_store()
+        rows = await store.list("swarm_missions", {"card_id": card_id})
+        if not rows:
+            return None
+        items = [SwarmMission.model_validate(r) for r in rows]
+        return sorted(items, key=lambda m: m.updated_at, reverse=True)[0]
+
+    async def stop_card(self, card_id: str) -> SwarmMission:
+        """Stop swarm for a card even when no mission row exists (e.g. after restart)."""
+        store = get_store()
+        mission = await self._latest_mission_for_card(card_id)
+        if mission:
+            stopped = await self.stop_mission(mission.id)
+            if stopped:
+                return stopped
+
+        task = self._tasks.get(card_id)
+        if task and not task.done():
+            task.cancel()
+
+        card_raw = await store.get("task_cards", card_id)
+        if not card_raw:
+            raise LookupError("Cartão não encontrado")
+        card = TaskCard.model_validate(card_raw)
+        previous = card.column
+        if card.column not in {KanbanColumn.CONCLUIDO, KanbanColumn.CANCELADO}:
+            card.column = KanbanColumn.CANCELADO
+        card.tags = list({*card.tags, "swarm_stopped"})
+        card.block_reason = "Enxame parado pelo usuário."
+        card.updated_at = datetime.utcnow()
+        await store.upsert("task_cards", card)
+        await self._move_children(card.id, KanbanColumn.CANCELADO, stagger=False)
+
+        mission = SwarmMission(
+            card_id=card.id,
+            objective=card.title,
+            status="stopped",
+            progress=0.0,
+            errors=["Missão parada pelo usuário"],
+            agents=[
+                AgentAssignment(
+                    agent_id="coordenador",
+                    role="coordenador",
+                    subtask="Coordenar",
+                    tools=["swarm"],
+                    status="stopped",
+                )
+            ],
+        )
+        await store.upsert("swarm_missions", mission)
+        await self._audit(
+            card,
+            "stop_swarm",
+            card.column.value,
+            {"mission_id": mission.id, "previous_state": previous.value, "via": "card"},
+        )
+        return mission
+
     async def start_mission(self, mission_id: str) -> SwarmMission | None:
         """Resume or relaunch a stopped / idle mission in the background."""
         store = get_store()
@@ -263,30 +322,63 @@ class RufloSwarmManager:
             return None
 
         mission = SwarmMission.model_validate(raw)
-        running = self._tasks.get(mission.card_id)
-        if running and not running.done():
-            return mission
+        return await self.start_card(mission.card_id)
 
-        if mission.status in {"running", "coordinating", "executing"} and mission.progress > 0:
-            # Soft-start: re-queue background execute even if status looks active
-            # but no live task is registered (e.g. after API restart).
-            pass
-
-        mission.status = "running"
-        mission.progress = max(mission.progress, 0.1)
-        mission.updated_at = datetime.utcnow()
-        mission.errors = [e for e in mission.errors if e != "Missão parada pelo usuário"]
-        for agent in mission.agents:
-            if agent.status in {"stopped", "failed", "blocked", "error"}:
-                agent.status = "assigned"
-                agent.output_summary = None
-        await store.upsert("swarm_missions", mission)
-
-        card_raw = await store.get("task_cards", mission.card_id)
+    async def start_card(self, card_id: str) -> SwarmMission:
+        """Start or resume swarm for a card (creates mission if missing)."""
+        store = get_store()
+        card_raw = await store.get("task_cards", card_id)
         if not card_raw:
-            return mission
-
+            raise LookupError("Cartão não encontrado")
         card = TaskCard.model_validate(card_raw)
+
+        running = self._tasks.get(card.id)
+        if running and not running.done():
+            existing = await self._latest_mission_for_card(card.id)
+            if existing:
+                return existing
+
+        mission = await self._latest_mission_for_card(card.id)
+        if mission:
+            mission.status = "running"
+            mission.progress = max(mission.progress, 0.1)
+            mission.updated_at = datetime.utcnow()
+            mission.errors = [e for e in mission.errors if e != "Missão parada pelo usuário"]
+            for agent in mission.agents:
+                if agent.status in {"stopped", "failed", "blocked", "error"}:
+                    agent.status = "assigned"
+                    agent.output_summary = None
+            await store.upsert("swarm_missions", mission)
+        else:
+            # Prefer creating a full mission when plan/requirements exist; else stub + execute.
+            try:
+                mission = await self.create_mission(card)
+            except Exception:
+                logger.exception("create_mission failed for %s; using stub mission", card.id)
+                mission = SwarmMission(
+                    card_id=card.id,
+                    objective=card.title,
+                    status="running",
+                    progress=0.1,
+                    agents=[
+                        AgentAssignment(
+                            agent_id="coordenador",
+                            role="coordenador",
+                            subtask="Coordenar",
+                            tools=["swarm"],
+                            status="assigned",
+                        ),
+                        AgentAssignment(
+                            agent_id="desenvolvedor",
+                            role="desenvolvedor",
+                            subtask="Implementar",
+                            tools=["git"],
+                            status="assigned",
+                        ),
+                    ],
+                )
+                await store.upsert("swarm_missions", mission)
+
         previous = card.column
         card.column = KanbanColumn.PRONTO_ENXAME
         card.tags = [t for t in card.tags if t not in {"swarm_stopped", "swarm_error"}]
@@ -299,7 +391,7 @@ class RufloSwarmManager:
             card,
             "start_swarm",
             card.column.value,
-            {"mission_id": mission.id, "previous_state": previous.value},
+            {"mission_id": mission.id, "previous_state": previous.value, "via": "card"},
         )
 
         asyncio.create_task(self._run_mission_safe(card.id))

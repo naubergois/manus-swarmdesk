@@ -98,6 +98,39 @@ select {
   animation: floaty 2.4s ease-in-out infinite;
 }
 
+@keyframes agentCelebrate {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+  15% {
+    transform: translateY(-14px) rotate(-12deg) scale(1.15);
+  }
+  30% {
+    transform: translateY(0) rotate(8deg) scale(1.05);
+  }
+  45% {
+    transform: translateY(-18px) rotate(10deg) scale(1.2);
+  }
+  60% {
+    transform: translateY(0) rotate(-6deg) scale(1.05);
+  }
+  75% {
+    transform: translateY(-10px) rotate(6deg) scale(1.12);
+  }
+}
+
+.agent-celebrate {
+  animation: agentCelebrate 0.55s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-celebrate {
+    animation: agentPulse 1.2s ease-in-out infinite;
+  }
+}
+
 @keyframes robotCardIn {
   from {
     opacity: 0;

@@ -38,3 +38,19 @@ async def start_mission(mission_id: str) -> SwarmMission:
     if not mission:
         raise HTTPException(status_code=404, detail="Missão não encontrada")
     return mission
+
+
+@router.post("/cards/{card_id}/stop")
+async def stop_card_swarm(card_id: str) -> SwarmMission:
+    try:
+        return await ruflo.stop_card(card_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/cards/{card_id}/start")
+async def start_card_swarm(card_id: str) -> SwarmMission:
+    try:
+        return await ruflo.start_card(card_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
