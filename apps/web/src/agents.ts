@@ -189,25 +189,30 @@ export const SOFTWARE_TEMPLATES = [
     title: "Todo Mini App",
     description:
       "Build a complete single-page Todo app with add/complete/delete, local persistence, clean UI, and a runnable preview.",
+    subtasks: ["UI", "State", "Deploy preview"],
   },
   {
     title: "Notes Pad",
     description:
       "Build a complete notes web app: create, edit, search notes, autosave in localStorage, modern UI, deploy a live preview.",
+    subtasks: ["Editor", "Search", "Deploy preview"],
   },
   {
     title: "JSON Echo API + UI",
     description:
       "Build a tiny full-stack tool: POST /echo API and a simple UI that sends JSON and shows the response. Make it runnable.",
+    subtasks: ["API", "UI", "Deploy preview"],
   },
   {
     title: "Bookmark Board",
     description:
       "Build a complete bookmark manager: save links with titles/tags, filter by tag, persist locally, ship a working preview.",
+    subtasks: ["Wireframes", "UI", "Deploy"],
   },
   {
     title: "Pomodoro Timer",
     description:
       "Build a complete Pomodoro timer web app with start/pause/reset, session history, and a polished runnable UI.",
+    subtasks: ["Timer controls", "Session history", "Deploy preview"],
   },
 ];

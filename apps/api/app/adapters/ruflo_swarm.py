@@ -41,6 +41,7 @@ from app.models.enums import (
     TicketCategory,
     TicketStatus,
 )
+from app.services import agent_bus as a2a
 
 _CHILD_MOVE_DELAY_S = 1.05
 
@@ -213,6 +214,18 @@ class RufloSwarmManager:
             "mission_id": mission.id,
             "topology": mission.topology,
         })
+        agent_names = ", ".join(a.agent_id for a in agents[:5])
+        extra = f" (+{len(agents) - 5})" if len(agents) > 5 else ""
+        await a2a.publish_a2a(
+            card,
+            "coordenador",
+            (
+                f"Enxame montado ({mission.topology}): {len(agents)} agentes "
+                f"— {agent_names}{extra}. Objetivo: {mission.objective[:100]}."
+            ),
+            message_type="status",
+            pipeline_step="design_swarm",
+        )
         return mission
 
     async def stop_mission(self, mission_id: str) -> SwarmMission | None:
@@ -383,9 +396,21 @@ class RufloSwarmManager:
         card.column = KanbanColumn.PRONTO_ENXAME
         card.tags = [t for t in card.tags if t not in {"swarm_stopped", "swarm_error"}]
         card.tags = list({*card.tags, "swarm_queued"})
+        if (card.kind or "epic") == "epic":
+            card.tags = list({*card.tags, "epic"})
         card.block_reason = None
         card.updated_at = datetime.utcnow()
         await store.upsert("task_cards", card)
+
+        # Ensure planned work is visible as nested child cards before the swarm runs.
+        if (card.kind or "epic") == "epic" and not card.parent_id:
+            try:
+                from app.adapters.langgraph_orchestrator import langgraph
+
+                await langgraph.materialize_work_cards(card)
+            except Exception:
+                logger.exception("Failed to materialize work cards for %s", card.id)
+
         await self._move_children(card.id, KanbanColumn.PRONTO_ENXAME, stagger=False)
         await self._audit(
             card,
@@ -461,6 +486,13 @@ class RufloSwarmManager:
         mission.status = "coordinating"
         mission.updated_at = datetime.utcnow()
         await store.upsert("swarm_missions", mission)
+        await a2a.publish_a2a(
+            card,
+            "coordenador",
+            "Coordenando o enxame — distribuindo tarefas entre os agentes.",
+            message_type="status",
+            pipeline_step="design_swarm",
+        )
         return {"mission": mission.model_dump(mode="json"), "card": card.model_dump(mode="json")}
 
     async def _node_execute_dev(self, state: SwarmState) -> SwarmState:
@@ -495,7 +527,23 @@ class RufloSwarmManager:
             state["correction_round"] = int(state.get("correction_round") or 0) + 1
             state["error"] = ""
             state["feedback"] = ""
+            await a2a.publish_a2a(
+                card,
+                "revisor",
+                f"Correção solicitada ao desenvolvedor: {feedback[:220]}{'…' if len(feedback) > 220 else ''}",
+                to_agent="desenvolvedor",
+                message_type="handoff",
+                pipeline_step="execute_dev",
+            )
 
+        await a2a.publish_a2a(
+            card,
+            "desenvolvedor",
+            "Iniciando implementação da mini-app e deploy do preview.",
+            to_agent="revisor",
+            message_type="status",
+            pipeline_step="execute_dev",
+        )
         implementation = await runners.run_developer(card, req_llm, plan)
         from app.services.runtime import deploy_app
 
@@ -537,6 +585,18 @@ class RufloSwarmManager:
             "preview_url": card.preview_url,
             "runtime_status": card.runtime_status,
         })
+        preview = card.preview_url or "sem preview"
+        await a2a.publish_a2a(
+            card,
+            "desenvolvedor",
+            (
+                f"Implementação concluída — {len(implementation.files_changed)} arquivo(s). "
+                f"Preview: {preview}. Encaminhando para revisão."
+            ),
+            to_agent="revisor",
+            message_type="handoff",
+            pipeline_step="execute_dev",
+        )
         return {
             "card": card.model_dump(mode="json"),
             "mission": mission.model_dump(mode="json"),
@@ -594,6 +654,19 @@ class RufloSwarmManager:
         await self._audit(card, "review_artifacts", KanbanColumn.EM_REVISAO.value, {
             "decision": review.decision.value,
         })
+
+        verdict = "aprovado" if review.decision != ReviewVerdict.REPROVADO else "reprovado"
+        await a2a.publish_a2a(
+            card,
+            "revisor",
+            (
+                f"Revisão {verdict} — {review.rationale[:180]}"
+                f"{'…' if len(review.rationale) > 180 else ''}"
+            ),
+            to_agent="testador" if review.decision != ReviewVerdict.REPROVADO else "desenvolvedor",
+            message_type="result" if review.decision != ReviewVerdict.REPROVADO else "handoff",
+            pipeline_step="review",
+        )
 
         if review.decision == ReviewVerdict.REPROVADO:
             round_n = int(state.get("correction_round") or 0)
@@ -680,6 +753,19 @@ class RufloSwarmManager:
             "passed": test.passed,
             "failed": test.failed,
         })
+
+        await a2a.publish_a2a(
+            card,
+            "testador",
+            (
+                f"Testes: {test.passed}/{test.executed} passaram"
+                f"{f', {test.failed} falharam' if test.failed else ''}. "
+                f"{test.recommendation[:120]}{'…' if len(test.recommendation) > 120 else ''}"
+            ),
+            to_agent="documentacao" if test.failed == 0 else "desenvolvedor",
+            message_type="result" if test.failed == 0 else "handoff",
+            pipeline_step="test",
+        )
 
         if test.failed > 0:
             round_n = int(state.get("correction_round") or 0)
@@ -794,6 +880,13 @@ class RufloSwarmManager:
             f"artifacts://{card.id}/delivery-notes.md",
             docs.markdown,
         )
+        await a2a.publish_a2a(
+            card,
+            "documentacao",
+            f"Notas de entrega geradas: {docs.summary[:200]}{'…' if len(docs.summary) > 200 else ''}",
+            message_type="result",
+            pipeline_step="document",
+        )
         await store.upsert("task_cards", card)
         return {"card": card.model_dump(mode="json"), "documentation": docs.model_dump(mode="json")}
 
@@ -820,6 +913,16 @@ class RufloSwarmManager:
         await store.upsert("swarm_missions", mission)
         await store.upsert("task_cards", card)
         await self._audit(card, "prepare_delivery", KanbanColumn.PRONTO_ENTREGA.value)
+        await a2a.publish_a2a(
+            card,
+            "coordenador",
+            (
+                "Entrega pronta — mini-app em preview e documentação anexada. "
+                "Aguardando aprovação final de entrega."
+            ),
+            message_type="status",
+            pipeline_step="prepare_delivery",
+        )
         return {"card": card.model_dump(mode="json"), "mission": mission.model_dump(mode="json")}
 
     async def _block_with_ticket(self, card: TaskCard, reason: str) -> TaskCard:
@@ -850,6 +953,14 @@ class RufloSwarmManager:
         await self._audit(card, "open_ticket_and_block", KanbanColumn.BLOQUEADO.value, {
             "ticket_id": ticket.id,
         })
+        await a2a.publish_a2a(
+            card,
+            "coordenador",
+            f"Enxame bloqueado: {reason[:200]}{'…' if len(reason) > 200 else ''}",
+            to_agent="chamados",
+            message_type="status",
+            pipeline_step="blocked",
+        )
         return card
 
     async def _artifact(

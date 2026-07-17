@@ -20,6 +20,7 @@ from app.models.contracts import (
     TaskCard,
 )
 from app.models.enums import ApprovalDecision, ApprovalType, KanbanColumn
+from app.services import agent_bus as a2a
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,18 @@ class LangGraphOrchestrator:
             card.column.value,
             triage.model_dump(mode="json"),
         )
+        await a2a.publish_a2a(
+            card,
+            "triagem",
+            (
+                f"Classifiquei «{card.title}» como {card.type.value} "
+                f"com prioridade {card.priority.value}. "
+                f"Encaminhando para requisitos."
+            ),
+            to_agent="requisitos",
+            message_type="handoff",
+            pipeline_step="classify",
+        )
         return {"card": card.model_dump(mode="json"), "triage": triage.model_dump(mode="json")}
 
     async def _node_refine(self, state: PipelineState) -> PipelineState:
@@ -113,6 +126,18 @@ class LangGraphOrchestrator:
         await store.upsert("requirements", requirements)
         await store.upsert("task_cards", card)
         await self._audit(card, "refine_requirements", previous.value, card.column.value)
+        await a2a.publish_a2a(
+            card,
+            "requisitos",
+            (
+                f"Especificação pronta: {len(requirements.functional)} requisitos funcionais, "
+                f"{len(requirements.acceptance_criteria)} critérios de aceite. "
+                f"Passando para o planejador."
+            ),
+            to_agent="planejador",
+            message_type="handoff",
+            pipeline_step="refine",
+        )
         return {
             "card": card.model_dump(mode="json"),
             "requirements": requirements.model_dump(mode="json"),
@@ -182,6 +207,18 @@ class LangGraphOrchestrator:
             KanbanColumn.REFINAMENTO.value,
             {"tasks": len(tasks), "child_ids": []},
         )
+        await a2a.publish_a2a(
+            card,
+            "planejador",
+            (
+                f"Plano com {len(tasks)} tarefas e {len(plan.required_agents)} agentes. "
+                f"Estratégia: {plan.strategy[:120]}{'…' if len(plan.strategy) > 120 else ''}. "
+                f"Solicitando aprovação humana do escopo."
+            ),
+            to_agent="supervisor",
+            message_type="result",
+            pipeline_step="plan",
+        )
         return {
             "card": card.model_dump(mode="json"),
             "plan": plan.model_dump(mode="json"),
@@ -216,21 +253,53 @@ class LangGraphOrchestrator:
             card.column.value,
             {"approval_id": approval.id, "auto": False},
         )
+        await a2a.publish_a2a(
+            card,
+            "supervisor",
+            (
+                "Escopo e plano prontos. Aguardando aprovação humana para "
+                "criar cartões de trabalho e liberar o enxame."
+            ),
+            message_type="status",
+            pipeline_step="request_approval",
+        )
         return {"card": card.model_dump(mode="json")}
 
     async def materialize_work_cards(self, card: TaskCard) -> list[str]:
-        """Create child work cards from the execution plan (idempotent)."""
+        """Create child work cards from the execution plan (idempotent).
+
+        Falls back to ``card.subtasks`` title strings when no plan exists yet,
+        so epics always get visible work items on the board.
+        """
         store = get_store()
         existing = await store.list("task_cards", {"parent_id": card.id})
         if existing:
             return [row["id"] for row in existing]
 
         plans = await store.list("execution_plans", {"card_id": card.id})
-        if not plans:
+        plan_tasks: list[PlanTask] = []
+        if plans:
+            plan = ExecutionPlan.model_validate(plans[-1])
+            plan_tasks = list(plan.tasks)
+
+        if not plan_tasks and card.subtasks:
+            # Synthesize plan tasks from denormalized titles (seed / early swarm).
+            roles = card.agents or ["desenvolvedor"]
+            plan_tasks = [
+                PlanTask(
+                    title=title,
+                    agent_role=roles[i % len(roles)],
+                    parallel_group=i,
+                )
+                for i, title in enumerate(card.subtasks)
+                if title.strip()
+            ]
+
+        if not plan_tasks:
             return []
-        plan = ExecutionPlan.model_validate(plans[-1])
+
         child_ids: list[str] = []
-        for task in plan.tasks:
+        for task in plan_tasks:
             child = TaskCard(
                 title=task.title,
                 description=(
@@ -253,6 +322,14 @@ class LangGraphOrchestrator:
             )
             await store.upsert("task_cards", child)
             child_ids.append(child.id)
+            await a2a.publish_a2a(
+                card,
+                "planejador",
+                f"Cartão de trabalho criado: «{task.title}» → agente {task.agent_role}.",
+                to_agent=task.agent_role,
+                message_type="handoff",
+                pipeline_step="materialize_work",
+            )
             await asyncio.sleep(0.9)
         return child_ids
 
@@ -268,6 +345,13 @@ class LangGraphOrchestrator:
         card.updated_at = datetime.utcnow()
         await store.upsert("task_cards", card)
         await self.materialize_work_cards(card)
+        await a2a.publish_a2a(
+            card,
+            "coordenador",
+            "Escopo aprovado. Enxame enfileirado — iniciando design e execução.",
+            message_type="status",
+            pipeline_step="swarm_queued",
+        )
         asyncio.create_task(self._run_swarm_safe(card.id))
         return card
 

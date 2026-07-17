@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import init_store
-from app.routers import agents, approvals, cards, chat, dashboard, projects, runtime, swarm, tickets
+from app.routers import agents, approvals, board_chat, cards, chat, dashboard, projects, runtime, swarm, tickets
 from app.services.seed import seed_if_empty
 
 
@@ -29,6 +29,7 @@ app.add_middleware(
 app.include_router(projects.router)
 app.include_router(cards.router)
 app.include_router(chat.router)
+app.include_router(board_chat.router)
 app.include_router(approvals.router)
 app.include_router(agents.router)
 app.include_router(swarm.router)

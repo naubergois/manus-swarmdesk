@@ -1,4 +1,5 @@
 import type {
+  AgentBoardMessage,
   AgentCatalogItem,
   CardDetail,
   ChatMessage,
@@ -58,6 +59,7 @@ export const api = {
       description: string;
       project_id?: string;
       priority?: string;
+      subtasks?: string[];
     }) =>
       request<TaskCard>("/cards", {
         method: "POST",
@@ -100,6 +102,16 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ message, project_id }),
       }),
+  },
+  boardChat: {
+    messages: (params?: { board_id?: string; card_id?: string; limit?: number }) => {
+      const q = new URLSearchParams();
+      if (params?.board_id) q.set("board_id", params.board_id);
+      if (params?.card_id) q.set("card_id", params.card_id);
+      if (params?.limit) q.set("limit", String(params.limit));
+      const qs = q.toString();
+      return request<AgentBoardMessage[]>(`/board-chat/messages${qs ? `?${qs}` : ""}`);
+    },
   },
   approvals: {
     list: () => request<HumanApproval[]>("/approvals"),

@@ -216,6 +216,7 @@ async def create_card(
         column=KanbanColumn.ENTRADA,
         kind="epic",
         tags=["epic"],
+        subtasks=[t.strip() for t in payload.subtasks if t.strip()],
     )
     await store.upsert("task_cards", card)
     if run_pipeline:

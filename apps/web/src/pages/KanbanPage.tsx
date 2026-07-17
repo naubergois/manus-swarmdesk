@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AGENT_ROBOTS, SOFTWARE_TEMPLATES, agentVisual } from "../agents";
 import { api } from "../api/client";
+import { BoardChatPanel } from "../components/BoardChatPanel";
 import { Badge, Button, PRIORITY_LABEL, priorityTone } from "../components/ui";
 import { playRobotCheer } from "../lib/robotCheer";
 import { useAppStore } from "../store";
@@ -25,6 +26,7 @@ import {
   resolveLaneDropTarget,
   type BoardLane,
   type BoardLaneId,
+  type AgentBoardMessage,
   type KanbanColumn,
   type TaskCard,
 } from "../types";
@@ -214,6 +216,10 @@ function CardBody({
           .filter((c) => c.parent_id === card.id)
           .sort((a, b) => a.created_at.localeCompare(b.created_at))
       : [];
+  const plannedTitles =
+    kind === "epic" && !children.length
+      ? card.subtasks.filter((t) => t.trim().length > 0)
+      : [];
   const agents = card.agents.length ? card.agents : working ? ["desenvolvedor"] : [];
   const visibleTags = card.tags.filter((t) => t !== "epic" && t !== "work").slice(0, 2);
 
@@ -303,53 +309,72 @@ function CardBody({
         </div>
       ) : null}
 
-      {!compact && children.length ? (
+      {!compact && (children.length || plannedTitles.length) ? (
         <div className="mt-2.5 space-y-1.5 border-t border-dashed border-slate-200/90 pt-2">
           <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-            Work · {children.length}
+            {children.length
+              ? `Work · ${children.length}`
+              : `Planned · ${plannedTitles.length}`}
           </p>
           <div className="flex flex-col gap-1.5">
-            {children.slice(0, 5).map((child, i) => {
-              const childWorking = WORKING_COLUMNS.has(child.column);
-              const childAgent = child.agents[0];
-              return (
-                <Link
-                  key={child.id}
-                  to={`/cards/${child.id}`}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  className={`board-subcard flex items-center gap-1.5 rounded-lg border bg-slate-50/90 px-2 py-1.5 transition hover:border-blue-200 hover:bg-white ${
-                    childWorking
-                      ? "border-blue-200 shadow-sm"
-                      : child.column === "concluido" || child.column === "pronto_entrega"
-                        ? "border-emerald-200"
-                        : "border-slate-200/80"
-                  }`}
-                  style={{ animationDelay: `${i * 120}ms` }}
-                >
-                  {childAgent ? (
-                    <AgentAvatar
-                      id={childAgent}
-                      working={childWorking}
-                      motionDelayMs={i * 180}
-                      size="sm"
-                    />
-                  ) : (
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-500">
+            {children.length
+              ? children.slice(0, 5).map((child, i) => {
+                  const childWorking = WORKING_COLUMNS.has(child.column);
+                  const childAgent = child.agents[0];
+                  return (
+                    <Link
+                      key={child.id}
+                      to={`/cards/${child.id}`}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className={`board-subcard flex items-center gap-1.5 rounded-lg border bg-slate-50/90 px-2 py-1.5 transition hover:border-blue-200 hover:bg-white ${
+                        childWorking
+                          ? "border-blue-200 shadow-sm"
+                          : child.column === "concluido" || child.column === "pronto_entrega"
+                            ? "border-emerald-200"
+                            : "border-slate-200/80"
+                      }`}
+                      style={{ animationDelay: `${i * 120}ms` }}
+                    >
+                      {childAgent ? (
+                        <AgentAvatar
+                          id={childAgent}
+                          working={childWorking}
+                          motionDelayMs={i * 180}
+                          size="sm"
+                        />
+                      ) : (
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-500">
+                          {i + 1}
+                        </span>
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-700">
+                        {child.title}
+                      </span>
+                      <Badge tone={childWorking ? "info" : "neutral"}>
+                        {COLUMN_SHORT_LABELS[child.column]}
+                      </Badge>
+                    </Link>
+                  );
+                })
+              : plannedTitles.slice(0, 5).map((title, i) => (
+                  <div
+                    key={`${card.id}-planned-${i}`}
+                    className="board-subcard flex items-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50/60 px-2 py-1.5"
+                    style={{ animationDelay: `${i * 120}ms` }}
+                  >
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-600">
                       {i + 1}
                     </span>
-                  )}
-                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-700">
-                    {child.title}
-                  </span>
-                  <Badge tone={childWorking ? "info" : "neutral"}>
-                    {COLUMN_SHORT_LABELS[child.column]}
-                  </Badge>
-                </Link>
-              );
-            })}
-            {children.length > 5 ? (
+                    <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-700">
+                      {title}
+                    </span>
+                    <Badge tone="accent">Planned</Badge>
+                  </div>
+                ))}
+            {(children.length > 5 || plannedTitles.length > 5) ? (
               <p className="px-1 text-[10px] font-semibold text-slate-400">
-                +{children.length - 5} more work items
+                +
+                {(children.length || plannedTitles.length) - 5} more work items
               </p>
             ) : null}
           </div>
@@ -446,6 +471,7 @@ export function KanbanPage() {
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
   const [selectedLiveId, setSelectedLiveId] = useState<string | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -454,6 +480,10 @@ export function KanbanPage() {
   const [deleting, setDeleting] = useState(false);
   const [swarmBusy, setSwarmBusy] = useState<"start" | "stop" | null>(null);
   const [celebrating, setCelebrating] = useState(false);
+  const [chatOpen, setChatOpen] = useState(true);
+  const [a2aMessages, setA2aMessages] = useState<AgentBoardMessage[]>([]);
+  const [chatFilterCardId, setChatFilterCardId] = useState<string | null>(null);
+  const [chatLoading, setChatLoading] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   useEffect(() => {
@@ -521,6 +551,8 @@ export function KanbanPage() {
       TaskCard[]
     >;
     for (const card of filtered) {
+      // Nest work items under their epic — do not also show them as top-level cards.
+      if (card.parent_id) continue;
       map[laneForColumn(card.column).id].push(card);
     }
     return map;
@@ -535,6 +567,23 @@ export function KanbanPage() {
   const activeCard = cards.find((c) => c.id === activeId) ?? null;
   const building = cards.filter((c) => WORKING_COLUMNS.has(c.column)).length;
   const isBusy = building > 0;
+  const boardId = cards[0]?.board_id ?? null;
+
+  async function refreshA2aMessages() {
+    if (!boardId) {
+      setA2aMessages([]);
+      return;
+    }
+    setChatLoading(true);
+    try {
+      const msgs = await api.boardChat.messages({ board_id: boardId, limit: 120 });
+      setA2aMessages(msgs);
+    } catch {
+      /* keep last messages on transient errors */
+    } finally {
+      setChatLoading(false);
+    }
+  }
 
   useEffect(() => {
     void refreshAll();
@@ -542,6 +591,13 @@ export function KanbanPage() {
     const id = window.setInterval(() => void refreshAll(), intervalMs);
     return () => window.clearInterval(id);
   }, [refreshAll, isBusy]);
+
+  useEffect(() => {
+    void refreshA2aMessages();
+    const intervalMs = isBusy ? 900 : 4000;
+    const id = window.setInterval(() => void refreshA2aMessages(), intervalMs);
+    return () => window.clearInterval(id);
+  }, [boardId, isBusy]);
 
   useEffect(() => {
     if (!liveApps.length) {
@@ -595,9 +651,11 @@ export function KanbanPage() {
         description:
           description.trim() ||
           `${title.trim()}\n\nBuild a complete small software product and deploy a live preview.`,
+        subtasks: draftSubtasks,
       });
       setTitle("");
       setDescription("");
+      setDraftSubtasks([]);
       setModalOpen(false);
       setToast("Task created — agents started triage");
       void refreshAll();
@@ -611,6 +669,7 @@ export function KanbanPage() {
   function useTemplate(template: (typeof SOFTWARE_TEMPLATES)[number]) {
     setTitle(template.title);
     setDescription(template.description);
+    setDraftSubtasks(template.subtasks ?? []);
     setModalOpen(true);
   }
 
@@ -782,7 +841,14 @@ export function KanbanPage() {
           <Button variant="danger" onClick={() => setResetOpen(true)}>
             Reset
           </Button>
-          <Button onClick={() => setModalOpen(true)}>+ Create</Button>
+          <Button
+            onClick={() => {
+              setDraftSubtasks([]);
+              setModalOpen(true);
+            }}
+          >
+            + Create
+          </Button>
         </div>
       </header>
 
@@ -823,38 +889,50 @@ export function KanbanPage() {
         </div>
       </div>
 
-      <DndContext
-        sensors={sensors}
-        onDragStart={(e: DragStartEvent) => setActiveId(String(e.active.id))}
-        onDragEnd={(e) => void onDragEnd(e)}
-      >
-        <div
-          className="grid min-h-0 flex-1 gap-2.5 overflow-hidden"
-          style={{
-            gridTemplateColumns: `repeat(${BOARD_LANES.length}, minmax(0, 1fr))`,
-          }}
+      <div className="flex min-h-0 flex-1 gap-2 overflow-hidden">
+        <DndContext
+          sensors={sensors}
+          onDragStart={(e: DragStartEvent) => setActiveId(String(e.active.id))}
+          onDragEnd={(e) => void onDragEnd(e)}
         >
-          {BOARD_LANES.map((lane) => (
-            <DroppableLane
-              key={lane.id}
-              lane={lane}
-              cards={byLane[lane.id]}
-              allCards={cards}
-              selectedIds={selectedIds}
-              celebrating={celebrating}
-              onToggleSelect={toggleSelect}
-              onDelete={(card) => setDeleteTarget([card])}
-            />
-          ))}
-        </div>
-        <DragOverlay>
-          {activeCard ? (
-            <div className="w-[240px] rotate-1 scale-[1.03]">
-              <CardBody card={activeCard} allCards={cards} />
-            </div>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
+          <div
+            className="grid min-h-0 min-w-0 flex-1 gap-2.5 overflow-hidden"
+            style={{
+              gridTemplateColumns: `repeat(${BOARD_LANES.length}, minmax(0, 1fr))`,
+            }}
+          >
+            {BOARD_LANES.map((lane) => (
+              <DroppableLane
+                key={lane.id}
+                lane={lane}
+                cards={byLane[lane.id]}
+                allCards={cards}
+                selectedIds={selectedIds}
+                celebrating={celebrating}
+                onToggleSelect={toggleSelect}
+                onDelete={(card) => setDeleteTarget([card])}
+              />
+            ))}
+          </div>
+          <DragOverlay>
+            {activeCard ? (
+              <div className="w-[240px] rotate-1 scale-[1.03]">
+                <CardBody card={activeCard} allCards={cards} />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+
+        <BoardChatPanel
+          open={chatOpen}
+          onToggle={() => setChatOpen((v) => !v)}
+          messages={a2aMessages}
+          cards={cards}
+          filterCardId={chatFilterCardId}
+          onFilterCardId={setChatFilterCardId}
+          loading={chatLoading}
+        />
+      </div>
 
       {liveApps.length ? (
         <LiveAppDock apps={liveApps} selectedId={selectedLiveId} onSelect={setSelectedLiveId} />

@@ -256,6 +256,21 @@ class ChatMessage(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class AgentBoardMessage(BaseModel):
+    """A2A message visible on the Kanban board chat."""
+
+    id: str = Field(default_factory=lambda: new_id("a2a_"))
+    board_id: str
+    card_id: str
+    from_agent_id: str
+    to_agent_id: str | None = None
+    message_type: str = "status"  # status | handoff | question | result
+    content: str
+    pipeline_step: str | None = None
+    correlation_id: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ChatRequest(BaseModel):
     message: str
     project_id: str | None = None
@@ -286,6 +301,7 @@ class CreateCardRequest(BaseModel):
     type: CardType = CardType.NOVA_FUNCIONALIDADE
     priority: Priority = Priority.MEDIA
     autonomy_level: AutonomyLevel = AutonomyLevel.IMPLEMENTACAO
+    subtasks: list[str] = Field(default_factory=list)
 
 
 class CreateProjectRequest(BaseModel):

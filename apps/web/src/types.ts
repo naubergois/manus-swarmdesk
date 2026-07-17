@@ -256,6 +256,19 @@ export interface ChatMessage {
   created_at: string;
 }
 
+export interface AgentBoardMessage {
+  id: string;
+  board_id: string;
+  card_id: string;
+  from_agent_id: string;
+  to_agent_id: string | null;
+  message_type: "status" | "handoff" | "question" | "result" | string;
+  content: string;
+  pipeline_step: string | null;
+  correlation_id: string | null;
+  created_at: string;
+}
+
 export interface ChatResponse {
   reply: string;
   card: TaskCard | null;
