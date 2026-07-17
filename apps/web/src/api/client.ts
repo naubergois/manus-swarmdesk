@@ -78,6 +78,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ decision: "reprovado", comment, approver: "product_owner" }),
       }),
+    reset: (reseedDemo = true) =>
+      request<{ ok: boolean; runtimes_stopped: number; reseeded: boolean }>(
+        `/cards/reset?reseed_demo=${reseedDemo}`,
+        { method: "POST" },
+      ),
   },
   chat: {
     messages: () => request<ChatMessage[]>("/chat/messages"),

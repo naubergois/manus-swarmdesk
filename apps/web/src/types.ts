@@ -309,6 +309,23 @@ export const COLUMN_LABELS: Record<KanbanColumn, string> = {
   cancelado: "Cancelled",
 };
 
+/** Ultra-short status chip inside merged board lanes. */
+export const COLUMN_SHORT_LABELS: Record<KanbanColumn, string> = {
+  entrada: "Inbox",
+  triagem: "Triage",
+  refinamento: "Refine",
+  aguardando_aprovacao: "Approve",
+  pronto_enxame: "Ready",
+  em_execucao: "Build",
+  em_revisao: "Review",
+  em_testes: "Test",
+  aguardando_decisao: "Decide",
+  pronto_entrega: "Ship",
+  concluido: "Live",
+  bloqueado: "Block",
+  cancelado: "Cancel",
+};
+
 export const COLUMN_COLORS: Record<KanbanColumn, string> = {
   entrada: "#94a3b8",
   triagem: "#06b6d4",
@@ -340,3 +357,81 @@ export const KANBAN_COLUMNS: KanbanColumn[] = [
   "bloqueado",
   "cancelado",
 ];
+
+/** Simplified board lanes — similar pipeline stages are grouped for readability. */
+export type BoardLaneId =
+  | "inbox"
+  | "approve"
+  | "build"
+  | "qa"
+  | "live"
+  | "parked";
+
+export type BoardLane = {
+  id: BoardLaneId;
+  label: string;
+  color: string;
+  columns: KanbanColumn[];
+  /** Default target when dropping a card into this lane. */
+  dropTarget: KanbanColumn;
+};
+
+export const BOARD_LANES: BoardLane[] = [
+  {
+    id: "inbox",
+    label: "Inbox",
+    color: "#64748b",
+    columns: ["entrada", "triagem", "refinamento"],
+    dropTarget: "entrada",
+  },
+  {
+    id: "approve",
+    label: "Approve",
+    color: "#f59e0b",
+    columns: ["aguardando_aprovacao", "aguardando_decisao"],
+    dropTarget: "aguardando_aprovacao",
+  },
+  {
+    id: "build",
+    label: "Build",
+    color: "#2563eb",
+    columns: ["pronto_enxame", "em_execucao"],
+    dropTarget: "em_execucao",
+  },
+  {
+    id: "qa",
+    label: "QA",
+    color: "#10b981",
+    columns: ["em_revisao", "em_testes"],
+    dropTarget: "em_revisao",
+  },
+  {
+    id: "live",
+    label: "Live",
+    color: "#059669",
+    columns: ["pronto_entrega", "concluido"],
+    dropTarget: "concluido",
+  },
+  {
+    id: "parked",
+    label: "Parked",
+    color: "#e11d48",
+    columns: ["bloqueado", "cancelado"],
+    dropTarget: "bloqueado",
+  },
+];
+
+export function laneForColumn(column: KanbanColumn): BoardLane {
+  return BOARD_LANES.find((lane) => lane.columns.includes(column)) ?? BOARD_LANES[0];
+}
+
+/** Prefer a valid transition into the lane; fall back to the lane default. */
+export function resolveLaneDropTarget(
+  from: KanbanColumn,
+  lane: BoardLane,
+  allowed: Partial<Record<KanbanColumn, KanbanColumn[]>>,
+): KanbanColumn {
+  const options = allowed[from] ?? [];
+  const hit = lane.columns.find((col) => options.includes(col));
+  return hit ?? lane.dropTarget;
+}

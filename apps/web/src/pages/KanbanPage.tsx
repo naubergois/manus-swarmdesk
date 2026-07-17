@@ -17,9 +17,13 @@ import { api } from "../api/client";
 import { Badge, Button, PRIORITY_LABEL, priorityTone } from "../components/ui";
 import { useAppStore } from "../store";
 import {
-  COLUMN_COLORS,
+  BOARD_LANES,
   COLUMN_LABELS,
-  KANBAN_COLUMNS,
+  COLUMN_SHORT_LABELS,
+  laneForColumn,
+  resolveLaneDropTarget,
+  type BoardLane,
+  type BoardLaneId,
   type KanbanColumn,
   type TaskCard,
 } from "../types";
@@ -33,6 +37,23 @@ const WORKING_COLUMNS = new Set<KanbanColumn>([
   "em_testes",
 ]);
 
+/** Mirrors backend ALLOWED transitions for smarter lane drops. */
+const ALLOWED: Partial<Record<KanbanColumn, KanbanColumn[]>> = {
+  entrada: ["triagem", "cancelado"],
+  triagem: ["refinamento", "aguardando_decisao", "cancelado"],
+  refinamento: ["aguardando_aprovacao", "aguardando_decisao", "cancelado"],
+  aguardando_aprovacao: ["pronto_enxame", "refinamento", "cancelado"],
+  pronto_enxame: ["em_execucao", "bloqueado", "cancelado"],
+  em_execucao: ["em_revisao", "bloqueado", "aguardando_decisao", "cancelado"],
+  em_revisao: ["em_testes", "em_execucao", "aguardando_decisao"],
+  em_testes: ["pronto_entrega", "em_execucao", "bloqueado"],
+  aguardando_decisao: ["refinamento", "em_execucao", "pronto_enxame", "cancelado", "bloqueado"],
+  pronto_entrega: ["concluido", "em_execucao", "cancelado"],
+  bloqueado: ["em_execucao", "aguardando_decisao", "cancelado"],
+  concluido: [],
+  cancelado: [],
+};
+
 function AgentAvatar({
   id,
   working = false,
@@ -43,11 +64,11 @@ function AgentAvatar({
   size?: "sm" | "md";
 }) {
   const agent = agentVisual(id);
-  const dim = size === "sm" ? "h-7 w-7 text-sm" : "h-9 w-9 text-base";
+  const dim = size === "sm" ? "h-6 w-6 text-xs" : "h-8 w-8 text-sm";
   return (
     <div
       title={`${agent.name} · ${agent.role}`}
-      className={`${dim} ${working ? "agent-working" : "agent-float"} inline-flex items-center justify-center rounded-full border-2 border-white text-center shadow-sm`}
+      className={`${dim} ${working ? "agent-working" : "agent-float"} inline-flex items-center justify-center rounded-full border border-white text-center shadow-sm`}
       style={{ background: `${agent.color}22`, color: agent.color }}
     >
       <span aria-hidden>{agent.emoji}</span>
@@ -55,33 +76,33 @@ function AgentAvatar({
   );
 }
 
-function DroppableColumn({
-  id,
+function DroppableLane({
+  lane,
   cards,
   allCards,
 }: {
-  id: KanbanColumn;
+  lane: BoardLane;
   cards: TaskCard[];
   allCards: TaskCard[];
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id });
+  const { setNodeRef, isOver } = useDroppable({ id: lane.id });
   return (
     <div
       ref={setNodeRef}
-      className={`flex w-[300px] shrink-0 flex-col rounded-2xl bg-[var(--board)]/90 transition ${
-        isOver ? "ring-2 ring-blue-500 ring-offset-2" : ""
+      className={`flex min-h-0 min-w-0 flex-col rounded-2xl bg-[var(--board)]/90 transition ${
+        isOver ? "ring-2 ring-blue-500 ring-offset-1" : ""
       }`}
     >
-      <div className="flex items-center justify-between gap-2 px-3 py-3">
-        <div className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full" style={{ background: COLUMN_COLORS[id] }} />
-          <h3 className="text-sm font-bold text-slate-700">{COLUMN_LABELS[id]}</h3>
+      <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: lane.color }} />
+          <h3 className="truncate text-sm font-bold text-slate-700">{lane.label}</h3>
         </div>
-        <span className="rounded-lg bg-white px-2 py-0.5 text-xs font-bold text-slate-500 shadow-sm">
+        <span className="shrink-0 rounded-lg bg-white px-2 py-0.5 text-xs font-bold text-slate-500 shadow-sm">
           {cards.length}
         </span>
       </div>
-      <div className="flex flex-1 flex-col gap-2.5 px-2.5 pb-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
         {cards.map((card) => (
           <DraggableCard key={card.id} card={card} allCards={allCards} />
         ))}
@@ -105,7 +126,15 @@ function DraggableCard({ card, allCards }: { card: TaskCard; allCards: TaskCard[
   );
 }
 
-function CardBody({ card, allCards = [] }: { card: TaskCard; allCards?: TaskCard[] }) {
+function CardBody({
+  card,
+  allCards = [],
+  compact = false,
+}: {
+  card: TaskCard;
+  allCards?: TaskCard[];
+  compact?: boolean;
+}) {
   const working = WORKING_COLUMNS.has(card.column);
   const kind = card.kind ?? (card.parent_id ? "work" : "epic");
   const parent = card.parent_id ? allCards.find((c) => c.id === card.parent_id) : undefined;
@@ -114,34 +143,43 @@ function CardBody({ card, allCards = [] }: { card: TaskCard; allCards?: TaskCard
 
   return (
     <div
-      className={`group rounded-xl border bg-white p-3 shadow-[var(--shadow-card)] transition hover:-translate-y-0.5 hover:shadow-md ${
+      className={`group rounded-xl border bg-white shadow-[var(--shadow-card)] transition hover:-translate-y-0.5 hover:shadow-md ${
+        compact ? "p-2" : "p-3"
+      } ${
         kind === "epic"
           ? "border-indigo-200/90 hover:border-indigo-300"
           : "border-slate-200/80 hover:border-blue-200"
       }`}
     >
-      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-        <Badge tone={kind === "epic" ? "accent" : "neutral"}>{kind === "epic" ? "Epic" : "Work"}</Badge>
+      <div className="mb-1.5 flex flex-wrap items-center gap-1">
+        <Badge tone={kind === "epic" ? "accent" : "neutral"}>
+          {kind === "epic" ? "Epic" : "Work"}
+        </Badge>
         <Badge tone={priorityTone(card.priority)}>
           {PRIORITY_LABEL[card.priority] ?? card.priority}
         </Badge>
+        <Badge tone="info">{COLUMN_SHORT_LABELS[card.column]}</Badge>
       </div>
-      <div className="flex items-start justify-between gap-2">
-        <Link
-          to={`/cards/${card.id}`}
-          className="text-sm font-bold leading-snug text-slate-900 hover:text-blue-600"
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          {card.title}
-        </Link>
-      </div>
+      <Link
+        to={`/cards/${card.id}`}
+        className={`block font-bold leading-snug text-slate-900 hover:text-blue-600 ${
+          compact ? "line-clamp-2 text-xs" : "text-sm"
+        }`}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        {card.title}
+      </Link>
       {parent ? (
         <p className="mt-1 text-[11px] font-semibold text-indigo-600/80">↳ {parent.title}</p>
       ) : null}
-      <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-slate-500">{card.description}</p>
+      {!compact ? (
+        <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-slate-500">
+          {card.description}
+        </p>
+      ) : null}
 
       {agents.length ? (
-        <div className="mt-3 flex items-center justify-between gap-2">
+        <div className="mt-2.5 flex items-center justify-between gap-2">
           <div className="flex -space-x-1.5">
             {agents.slice(0, 4).map((id) => (
               <AgentAvatar key={id} id={id} working={working} size="sm" />
@@ -149,32 +187,91 @@ function CardBody({ card, allCards = [] }: { card: TaskCard; allCards?: TaskCard
           </div>
           {working ? (
             <span className="text-[10px] font-bold uppercase tracking-wide text-blue-600">
-              Agents building
+              Building
             </span>
           ) : null}
         </div>
       ) : null}
 
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      <div className="mt-2 flex flex-wrap items-center gap-1">
         {visibleTags.map((tag) => (
           <Badge key={tag} tone="neutral">
             {tag}
           </Badge>
         ))}
         {card.preview_url ? (
-          <a
-            href={card.preview_url}
-            target="_blank"
-            rel="noreferrer"
-            onPointerDown={(e) => e.stopPropagation()}
-            className="inline-flex items-center rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100"
-          >
+          <span className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
             Live app
-          </a>
+          </span>
         ) : null}
         {card.block_reason ? <Badge tone="danger">Blocked</Badge> : null}
       </div>
     </div>
+  );
+}
+
+function LiveAppDock({
+  apps,
+  selectedId,
+  onSelect,
+}: {
+  apps: TaskCard[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const selected = apps.find((c) => c.id === selectedId) ?? apps[0] ?? null;
+  if (!selected?.preview_url) return null;
+
+  return (
+    <section className="flex min-h-0 flex-[0_0_38%] flex-col overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-[var(--shadow-card)]">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-emerald-100 bg-emerald-50/80 px-3 py-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+            </span>
+            <h2 className="truncate text-sm font-extrabold text-emerald-900">
+              App running — {selected.title}
+            </h2>
+          </div>
+          <p className="mt-0.5 truncate text-[11px] text-emerald-700/80">{selected.preview_url}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {apps.map((app) => (
+            <button
+              key={app.id}
+              type="button"
+              onClick={() => onSelect(app.id)}
+              className={`rounded-lg px-2 py-1 text-[11px] font-bold transition ${
+                app.id === selected.id
+                  ? "bg-emerald-600 text-white"
+                  : "bg-white text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"
+              }`}
+            >
+              {app.title.length > 18 ? `${app.title.slice(0, 18)}…` : app.title}
+            </button>
+          ))}
+          <a
+            href={selected.preview_url}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg bg-white px-2 py-1 text-[11px] font-bold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"
+          >
+            Open ↗
+          </a>
+        </div>
+      </div>
+      <div className="relative min-h-0 flex-1 bg-slate-100">
+        <iframe
+          key={selected.preview_url}
+          title={`Live preview — ${selected.title}`}
+          src={selected.preview_url}
+          className="absolute inset-0 h-full w-full border-0 bg-white"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        />
+      </div>
+    </section>
   );
 }
 
@@ -186,6 +283,9 @@ export function KanbanPage() {
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [selectedLiveId, setSelectedLiveId] = useState<string | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   const filtered = useMemo(() => {
@@ -199,18 +299,25 @@ export function KanbanPage() {
     );
   }, [cards, filter]);
 
-  const byColumn = useMemo(() => {
-    const map = Object.fromEntries(KANBAN_COLUMNS.map((c) => [c, [] as TaskCard[]])) as Record<
-      KanbanColumn,
+  const byLane = useMemo(() => {
+    const map = Object.fromEntries(BOARD_LANES.map((l) => [l.id, [] as TaskCard[]])) as Record<
+      BoardLaneId,
       TaskCard[]
     >;
-    for (const card of filtered) map[card.column].push(card);
+    for (const card of filtered) {
+      map[laneForColumn(card.column).id].push(card);
+    }
     return map;
   }, [filtered]);
 
+  const liveApps = useMemo(() => {
+    const withPreview = cards.filter((c) => Boolean(c.preview_url));
+    const epics = withPreview.filter((c) => (c.kind ?? "epic") === "epic" || !c.parent_id);
+    return epics.length ? epics : withPreview;
+  }, [cards]);
+
   const activeCard = cards.find((c) => c.id === activeId) ?? null;
   const building = cards.filter((c) => WORKING_COLUMNS.has(c.column)).length;
-  const live = cards.filter((c) => c.preview_url || c.column === "concluido").length;
   const isBusy = building > 0;
 
   useEffect(() => {
@@ -220,20 +327,37 @@ export function KanbanPage() {
     return () => window.clearInterval(id);
   }, [refreshAll, isBusy]);
 
+  useEffect(() => {
+    if (!liveApps.length) {
+      setSelectedLiveId(null);
+      return;
+    }
+    if (!selectedLiveId || !liveApps.some((c) => c.id === selectedLiveId)) {
+      setSelectedLiveId(liveApps[0].id);
+    }
+  }, [liveApps, selectedLiveId]);
+
   async function onDragEnd(event: DragEndEvent) {
     setActiveId(null);
     const cardId = String(event.active.id);
-    const target = event.over?.id as KanbanColumn | undefined;
-    if (!target || !KANBAN_COLUMNS.includes(target)) return;
+    const laneId = event.over?.id as BoardLaneId | undefined;
+    const lane = BOARD_LANES.find((l) => l.id === laneId);
+    if (!lane) return;
+
     const card = cards.find((c) => c.id === cardId);
-    if (!card || card.column === target) return;
+    if (!card) return;
+    if (laneForColumn(card.column).id === lane.id) return;
+
+    const target = resolveLaneDropTarget(card.column, lane, ALLOWED);
+    if (target === card.column) return;
 
     const previous = cards;
     setCards(cards.map((c) => (c.id === cardId ? { ...c, column: target } : c)));
     try {
-      const updated = await api.cards.transition(cardId, target);
+      const reason = target === "bloqueado" ? "Moved to Parked from board" : undefined;
+      const updated = await api.cards.transition(cardId, target, reason);
       setCards(previous.map((c) => (c.id === cardId ? updated : c)));
-      setToast(`Moved to ${COLUMN_LABELS[target]}`);
+      setToast(`Moved to ${lane.label} (${COLUMN_LABELS[target]})`);
       await refreshAll();
     } catch (err) {
       setCards(previous);
@@ -274,96 +398,169 @@ export function KanbanPage() {
     setModalOpen(true);
   }
 
+  async function resetBoard(reseedDemo: boolean) {
+    setResetting(true);
+    try {
+      const res = await api.cards.reset(reseedDemo);
+      setSelectedLiveId(null);
+      setResetOpen(false);
+      setToast(
+        `Board reset — ${res.runtimes_stopped} app(s) stopped${
+          reseedDemo ? " · demo regenerated" : ""
+        }`,
+      );
+      await refreshAll();
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : "Failed to reset board");
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  const coreAgents = agents.length
+    ? AGENT_ROBOTS.filter((a) => agents.some((x) => x.id === a.id))
+    : AGENT_ROBOTS;
+
   return (
-    <div className="space-y-4">
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
+    <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">Board</h1>
-            <Badge tone="accent">Trello-style</Badge>
+            <h1 className="text-xl font-extrabold tracking-tight text-slate-900">Board</h1>
+            <Badge tone="accent">6 lanes</Badge>
+            {liveApps.length ? <Badge tone="success">{liveApps.length} live</Badge> : null}
           </div>
-          <p className="mt-1 text-sm text-slate-500">
-            Create mini-software tasks. Robot agents build, review, test, and deploy live previews.
+          <p className="mt-0.5 hidden text-xs text-slate-500 sm:block">
+            Similar stages merged. Chip on each card shows the detailed status.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm">
-            {building} building · {live} live
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 shadow-sm">
+            {building} building · {liveApps.length} live
           </div>
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search tasks..."
-            className="w-44 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-blue-500 focus:ring-2 sm:w-56"
+            placeholder="Search..."
+            className="w-32 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none ring-blue-500 focus:ring-2 sm:w-40"
           />
-          <Button onClick={() => setModalOpen(true)}>+ Create task</Button>
+          <Button variant="danger" onClick={() => setResetOpen(true)}>
+            Reset
+          </Button>
+          <Button onClick={() => setModalOpen(true)}>+ Create</Button>
         </div>
       </header>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-card)]">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-bold text-slate-800">Core robot agents</h2>
-          <Link to="/agents" className="text-xs font-bold text-blue-600 hover:underline">
-            Browse {agents.length || 260}+ robots
-          </Link>
-        </div>
-        <div className="flex gap-3 overflow-x-auto pb-1">
-          {(agents.length
-            ? AGENT_ROBOTS.filter((a) => agents.some((x) => x.id === a.id))
-            : AGENT_ROBOTS
-          ).map((agent) => (
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex max-w-full gap-1.5 overflow-x-auto">
+          {coreAgents.slice(0, 6).map((agent) => (
             <div
               key={agent.id}
-              className="min-w-[160px] rounded-xl border border-slate-100 bg-slate-50 px-3 py-3"
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1"
+              title={agent.blurb}
             >
-              <div className="flex items-center gap-2">
-                <AgentAvatar id={agent.id} />
-                <div>
-                  <div className="text-sm font-bold">{agent.name}</div>
-                  <div className="text-[11px] font-semibold text-slate-500">{agent.role}</div>
-                </div>
-              </div>
-              <p className="mt-2 text-[11px] leading-relaxed text-slate-500">{agent.blurb}</p>
+              <AgentAvatar id={agent.id} size="sm" />
+              <span className="text-[10px] font-bold text-slate-700">{agent.name}</span>
             </div>
           ))}
-        </div>
-      </section>
-
-      <section className="flex flex-wrap gap-2">
-        {SOFTWARE_TEMPLATES.map((template) => (
-          <button
-            key={template.title}
-            onClick={() => useTemplate(template)}
-            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-blue-300 hover:text-blue-700"
+          <Link
+            to="/agents"
+            className="shrink-0 self-center text-[10px] font-bold text-blue-600 hover:underline"
           >
-            {template.title}
-          </button>
-        ))}
-      </section>
+            +{Math.max(0, (agents.length || 260) - 6)} robots
+          </Link>
+        </div>
+        <div className="flex max-w-full flex-1 gap-1 overflow-x-auto">
+          {SOFTWARE_TEMPLATES.map((template) => (
+            <button
+              key={template.title}
+              onClick={() => useTemplate(template)}
+              className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 shadow-sm transition hover:border-blue-300 hover:text-blue-700"
+            >
+              {template.title}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <DndContext
         sensors={sensors}
         onDragStart={(e: DragStartEvent) => setActiveId(String(e.active.id))}
         onDragEnd={(e) => void onDragEnd(e)}
       >
-        <div className="flex gap-3 overflow-x-auto pb-6">
-          {KANBAN_COLUMNS.map((column) => (
-            <DroppableColumn
-              key={column}
-              id={column}
-              cards={byColumn[column]}
+        <div
+          className="grid min-h-0 flex-1 gap-2.5 overflow-hidden"
+          style={{
+            gridTemplateColumns: `repeat(${BOARD_LANES.length}, minmax(0, 1fr))`,
+          }}
+        >
+          {BOARD_LANES.map((lane) => (
+            <DroppableLane
+              key={lane.id}
+              lane={lane}
+              cards={byLane[lane.id]}
               allCards={cards}
             />
           ))}
         </div>
         <DragOverlay>
           {activeCard ? (
-            <div className="w-[280px] rotate-1 scale-[1.03]">
+            <div className="w-[240px] rotate-1 scale-[1.03]">
               <CardBody card={activeCard} allCards={cards} />
             </div>
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      {liveApps.length ? (
+        <LiveAppDock apps={liveApps} selectedId={selectedLiveId} onSelect={setSelectedLiveId} />
+      ) : (
+        <div className="shrink-0 rounded-xl border border-dashed border-slate-300 bg-white/70 px-3 py-2 text-center text-[11px] text-slate-500">
+          When an epic finishes, the developed app appears here — running live.
+        </div>
+      )}
+
+      {resetOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-4 sm:items-center">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-extrabold tracking-tight text-rose-700">
+                  Reset board
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Deletes all cards and stops every generated app. This cannot be undone.
+                </p>
+              </div>
+              <button
+                onClick={() => setResetOpen(false)}
+                className="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="mt-5 flex flex-col gap-2">
+              <Button
+                variant="danger"
+                disabled={resetting}
+                onClick={() => void resetBoard(true)}
+              >
+                {resetting ? "Resetting..." : "Delete all & regenerate demo"}
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={resetting}
+                onClick={() => void resetBoard(false)}
+              >
+                {resetting ? "Resetting..." : "Delete all (empty board)"}
+              </Button>
+              <Button variant="ghost" disabled={resetting} onClick={() => setResetOpen(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {modalOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-4 sm:items-center">

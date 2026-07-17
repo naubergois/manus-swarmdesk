@@ -106,6 +106,33 @@ async def _run_pipeline_safe(card_id: str) -> None:
             logger.exception("Failed to mark pipeline_error on %s", card_id)
 
 
+async def reset_board(*, reseed_demo: bool = True) -> dict:
+    """Delete all cards and generated apps so the board can be regenerated.
+
+    Stops every running mini-app, wipes card-related data and workspaces,
+    and (optionally) re-seeds the fresh demo board.
+    """
+    from app.db import init_store
+    from app.services import runtime as runtime_service
+    from app.services.seed import seed_if_empty
+
+    stopped = runtime_service.stop_all_runtimes()
+    runtime_service.clear_workspaces()
+
+    store = get_store()
+    await store.clear()
+    # Rebuild an empty store (also reconnects Mongo collections if configured).
+    await init_store()
+
+    seeded = False
+    if reseed_demo:
+        result = await seed_if_empty()
+        seeded = bool(result.get("seeded", True))
+
+    logger.info("Board reset: stopped=%s reseed_demo=%s", stopped, reseed_demo)
+    return {"ok": True, "runtimes_stopped": stopped, "reseeded": seeded}
+
+
 async def create_card(
     payload: CreateCardRequest,
     run_pipeline: bool = True,

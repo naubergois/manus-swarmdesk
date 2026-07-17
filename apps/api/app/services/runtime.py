@@ -53,6 +53,31 @@ def stop_runtime(card_id: str) -> None:
             pass
 
 
+def stop_all_runtimes() -> int:
+    """Terminate every running mini-app. Returns how many were stopped."""
+    count = 0
+    for card_id in list(_processes.keys()):
+        stop_runtime(card_id)
+        count += 1
+    return count
+
+
+def clear_workspaces() -> None:
+    """Remove all generated app files so they can be regenerated cleanly."""
+    import shutil
+
+    if not WORKSPACES.exists():
+        return
+    for child in WORKSPACES.iterdir():
+        try:
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def write_app_files(card_id: str, files: list[AppFile]) -> Path:
     root = workspace_for(card_id)
     # clean previous non-hidden files lightly

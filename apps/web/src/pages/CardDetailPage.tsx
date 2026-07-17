@@ -116,6 +116,32 @@ export function CardDetailPage() {
         ))}
       </div>
 
+      {card.preview_url ? (
+        <Panel
+          title="App running"
+          action={
+            <a
+              href={card.preview_url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm font-bold text-emerald-700 hover:underline"
+            >
+              Open ↗
+            </a>
+          }
+        >
+          <div className="overflow-hidden rounded-xl border border-emerald-100 bg-slate-100">
+            <iframe
+              title={`Live preview — ${card.title}`}
+              src={card.preview_url}
+              className="h-[420px] w-full border-0 bg-white"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            />
+          </div>
+          <p className="mt-2 text-xs text-[var(--muted)]">{card.preview_url}</p>
+        </Panel>
+      ) : null}
+
       {tab === "descricao" && (
         <Panel title="Descrição">
           <p className="whitespace-pre-wrap leading-relaxed">{card.description}</p>
