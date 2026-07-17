@@ -33,6 +33,8 @@ export type CardType =
 
 export type Priority = "baixa" | "media" | "alta" | "critica";
 
+export type CardKind = "epic" | "work";
+
 export interface TaskCard {
   id: string;
   title: string;
@@ -44,6 +46,9 @@ export interface TaskCard {
   requester: string;
   human_owner: string;
   column: KanbanColumn;
+  kind?: CardKind;
+  parent_id?: string | null;
+  plan_task_id?: string | null;
   tags: string[];
   due_date: string | null;
   dependencies: string[];

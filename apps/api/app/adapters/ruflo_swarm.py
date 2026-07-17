@@ -7,6 +7,7 @@ hierarchically by a coordinator design step.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any, TypedDict
 
@@ -37,6 +38,8 @@ from app.models.enums import (
     TicketCategory,
     TicketStatus,
 )
+
+_CHILD_MOVE_DELAY_S = 0.65
 
 
 class SwarmState(TypedDict, total=False):
@@ -97,6 +100,58 @@ class RufloSwarmManager:
             round_n = int(state.get("correction_round") or 0)
             return "fix" if round_n < 1 else "block"
         return "document"
+
+    async def _list_children(self, epic_id: str) -> list[TaskCard]:
+        store = get_store()
+        rows = await store.list("task_cards", {"parent_id": epic_id})
+        children = [TaskCard.model_validate(r) for r in rows]
+        return sorted(children, key=lambda c: c.created_at)
+
+    async def _move_children(
+        self,
+        epic_id: str,
+        column: KanbanColumn,
+        *,
+        stagger: bool = True,
+        by_group: bool = False,
+    ) -> list[str]:
+        """Move work cards belonging to an epic into a column (visible on Kanban)."""
+        store = get_store()
+        children = await self._list_children(epic_id)
+        if not children:
+            return []
+
+        if by_group:
+            groups: dict[int, list[TaskCard]] = {}
+            for child in children:
+                group = 0
+                for tag in child.tags:
+                    if tag.startswith("group:"):
+                        try:
+                            group = int(tag.split(":", 1)[1])
+                        except ValueError:
+                            group = 0
+                groups.setdefault(group, []).append(child)
+            moved: list[str] = []
+            for group in sorted(groups):
+                for child in groups[group]:
+                    child.column = column
+                    child.updated_at = datetime.utcnow()
+                    await store.upsert("task_cards", child)
+                    moved.append(child.id)
+                if stagger:
+                    await asyncio.sleep(_CHILD_MOVE_DELAY_S)
+            return moved
+
+        moved = []
+        for child in children:
+            child.column = column
+            child.updated_at = datetime.utcnow()
+            await store.upsert("task_cards", child)
+            moved.append(child.id)
+            if stagger:
+                await asyncio.sleep(_CHILD_MOVE_DELAY_S)
+        return moved
 
     async def create_mission(self, card: TaskCard) -> SwarmMission:
         store = get_store()
@@ -195,6 +250,7 @@ class RufloSwarmManager:
         card.column = KanbanColumn.EM_EXECUCAO
         card.updated_at = datetime.utcnow()
         await store.upsert("task_cards", card)
+        await self._move_children(card.id, KanbanColumn.EM_EXECUCAO, by_group=True)
 
         req_llm = RequirementsResult(
             objective=requirements.objective,
@@ -279,6 +335,8 @@ class RufloSwarmManager:
         card.column = KanbanColumn.EM_REVISAO
         card.budget_spent += 18_000
         card.updated_at = datetime.utcnow()
+        await store.upsert("task_cards", card)
+        await self._move_children(card.id, KanbanColumn.EM_REVISAO)
 
         req_llm = RequirementsResult(
             objective=requirements.objective,
@@ -353,6 +411,8 @@ class RufloSwarmManager:
         card.column = KanbanColumn.EM_TESTES
         card.budget_spent += 22_000
         card.updated_at = datetime.utcnow()
+        await store.upsert("task_cards", card)
+        await self._move_children(card.id, KanbanColumn.EM_TESTES)
 
         req_llm = RequirementsResult(
             objective=requirements.objective,
@@ -525,6 +585,7 @@ class RufloSwarmManager:
         mission.progress = 1.0
         mission.status = "awaiting_delivery_approval"
         mission.updated_at = datetime.utcnow()
+        await self._move_children(card.id, KanbanColumn.CONCLUIDO, stagger=True)
         approval = HumanApproval(
             card_id=card.id,
             type=ApprovalType.ENTREGA,
@@ -543,6 +604,7 @@ class RufloSwarmManager:
         card.column = KanbanColumn.BLOQUEADO
         card.block_reason = reason[:500]
         card.updated_at = datetime.utcnow()
+        await self._move_children(card.id, KanbanColumn.BLOQUEADO, stagger=False)
         ticket = SupportTicket(
             category=TicketCategory.BLOQUEIO,
             title=f"Bloqueio: {card.title}",

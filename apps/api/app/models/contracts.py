@@ -33,6 +33,9 @@ class TaskCard(BaseModel):
     requester: str = "usuario"
     human_owner: str = "product_owner"
     column: KanbanColumn = KanbanColumn.ENTRADA
+    kind: str = "epic"  # epic | work
+    parent_id: str | None = None
+    plan_task_id: str | None = None
     tags: list[str] = Field(default_factory=list)
     due_date: datetime | None = None
     dependencies: list[str] = Field(default_factory=list)

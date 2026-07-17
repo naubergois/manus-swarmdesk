@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime
 from typing import Any, TypedDict
 
@@ -12,12 +14,13 @@ from app.db import get_store
 from app.models.contracts import (
     AuditEvent,
     ExecutionPlan,
-    HumanApproval,
     PlanTask,
     RequirementSpecification,
     TaskCard,
 )
-from app.models.enums import ApprovalDecision, ApprovalType, KanbanColumn
+from app.models.enums import KanbanColumn
+
+logger = logging.getLogger(__name__)
 
 
 class PipelineState(TypedDict, total=False):
@@ -37,13 +40,13 @@ class LangGraphOrchestrator:
         graph.add_node("classify", self._node_classify)
         graph.add_node("refine", self._node_refine)
         graph.add_node("plan", self._node_plan)
-        graph.add_node("request_approval", self._node_request_approval)
+        graph.add_node("launch_swarm", self._node_launch_swarm)
 
         graph.add_edge(START, "classify")
         graph.add_edge("classify", "refine")
         graph.add_edge("refine", "plan")
-        graph.add_edge("plan", "request_approval")
-        graph.add_edge("request_approval", END)
+        graph.add_edge("plan", "launch_swarm")
+        graph.add_edge("launch_swarm", END)
         return graph.compile()
 
     async def receive_demand(self, card: TaskCard) -> TaskCard:
@@ -57,7 +60,9 @@ class LangGraphOrchestrator:
         store = get_store()
         card = TaskCard.model_validate(state["card"])
         previous = card.column
+        card.kind = "epic"
         card.column = KanbanColumn.TRIAGEM
+        card.tags = list({*card.tags, "epic", "triaged"})
         card.updated_at = datetime.utcnow()
         await store.upsert("task_cards", card)
 
@@ -65,7 +70,7 @@ class LangGraphOrchestrator:
         card.title = triage.title or card.title
         card.type = triage.type
         card.priority = triage.priority
-        card.tags = list({*card.tags, *triage.tags, "triaged"})
+        card.tags = list({*card.tags, *triage.tags, "epic", "triaged"})
         card.updated_at = datetime.utcnow()
         await store.upsert("task_cards", card)
         await self._audit(
@@ -140,6 +145,15 @@ class LangGraphOrchestrator:
             )
             for t in plan_out.tasks
         ]
+        # Ensure at least a few architecture work cards so the board always animates.
+        if not tasks:
+            tasks = [
+                PlanTask(title="Scaffold app shell", agent_role="Forge", parallel_group=0),
+                PlanTask(title="Implement core features", agent_role="Forge", parallel_group=1),
+                PlanTask(title="Review & harden", agent_role="Lens", parallel_group=2),
+                PlanTask(title="Test & ship preview", agent_role="Lens", parallel_group=3),
+            ]
+
         plan = ExecutionPlan(
             card_id=card.id,
             objective=plan_out.objective,
@@ -151,42 +165,97 @@ class LangGraphOrchestrator:
             estimated_effort_hours=plan_out.estimated_effort_hours,
             completion_criteria=plan_out.completion_criteria or card.acceptance_criteria,
         )
+        card.kind = "epic"
         card.subtasks = [t.title for t in tasks]
         card.agents = plan.required_agents
+        card.tags = list({*card.tags, "epic", "architected"})
         card.updated_at = datetime.utcnow()
         await store.upsert("execution_plans", plan)
         await store.upsert("task_cards", card)
-        await self._audit(card, "plan_execution", card.column.value, card.column.value, {
-            "tasks": len(tasks),
-        })
+
+        child_ids: list[str] = []
+        for task in tasks:
+            child = TaskCard(
+                title=task.title,
+                description=(
+                    f"Work item for epic **{card.title}**.\n\n"
+                    f"Role: {task.agent_role}\n"
+                    f"Group: {task.parallel_group}\n\n"
+                    f"{card.description[:500]}"
+                ),
+                type=card.type,
+                project_id=card.project_id,
+                board_id=card.board_id,
+                priority=card.priority,
+                kind="work",
+                parent_id=card.id,
+                plan_task_id=task.id,
+                column=KanbanColumn.PRONTO_ENXAME,
+                agents=[task.agent_role],
+                tags=["work", f"agent:{task.agent_role}", f"group:{task.parallel_group}"],
+                autonomy_level=card.autonomy_level,
+            )
+            await store.upsert("task_cards", child)
+            child_ids.append(child.id)
+            # Stagger so the board poll can show cards appearing one by one.
+            await asyncio.sleep(0.55)
+
+        await self._audit(
+            card,
+            "plan_execution",
+            KanbanColumn.REFINAMENTO.value,
+            KanbanColumn.REFINAMENTO.value,
+            {"tasks": len(tasks), "child_ids": child_ids},
+        )
         return {
             "card": card.model_dump(mode="json"),
             "plan": plan.model_dump(mode="json"),
         }
 
-    async def _node_request_approval(self, state: PipelineState) -> PipelineState:
+    async def _node_launch_swarm(self, state: PipelineState) -> PipelineState:
+        """Skip scope approval — move epic to Pronto Enxame and start Ruflo in background."""
         store = get_store()
         card = TaskCard.model_validate(state["card"])
         previous = card.column
-        card.column = KanbanColumn.AGUARDANDO_APROVACAO
+        card.column = KanbanColumn.PRONTO_ENXAME
+        card.kind = "epic"
+        card.tags = list({*card.tags, "epic", "swarm_queued"})
         card.updated_at = datetime.utcnow()
-        approval = HumanApproval(
-            card_id=card.id,
-            type=ApprovalType.ESCOPO,
-            requester="supervisor",
-            decision=ApprovalDecision.PENDENTE,
-            comment="Escopo, requisitos e plano gerados por agentes LLM — aguardando aprovação humana.",
-        )
-        await store.upsert("approvals", approval)
         await store.upsert("task_cards", card)
         await self._audit(
             card,
-            "request_human_approval",
+            "launch_swarm",
             previous.value,
             card.column.value,
-            {"approval_id": approval.id},
+            {"auto": True},
         )
+
+        asyncio.create_task(self._run_swarm_safe(card.id))
         return {"card": card.model_dump(mode="json")}
+
+    async def _run_swarm_safe(self, card_id: str) -> None:
+        try:
+            from app.adapters.ruflo_swarm import ruflo
+
+            store = get_store()
+            raw = await store.get("task_cards", card_id)
+            if not raw:
+                return
+            card = TaskCard.model_validate(raw)
+            await ruflo.create_mission(card)
+            await ruflo.execute(card)
+        except Exception:
+            logger.exception("Background swarm failed for %s", card_id)
+            try:
+                store = get_store()
+                raw = await store.get("task_cards", card_id)
+                if raw:
+                    card = TaskCard.model_validate(raw)
+                    card.tags = list({*card.tags, "swarm_error"})
+                    card.updated_at = datetime.utcnow()
+                    await store.upsert("task_cards", card)
+            except Exception:
+                logger.exception("Failed to mark swarm_error on %s", card_id)
 
     async def _audit(
         self,

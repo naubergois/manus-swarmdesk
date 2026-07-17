@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from functools import lru_cache
 
 from fastapi import HTTPException
@@ -127,8 +128,11 @@ def _is_quota_error(exc: Exception) -> bool:
     )
 
 
+_LLM_TIMEOUT_S = 60.0
+
+
 async def structured_invoke(schema: type, system: str, human: str):
-    """Invoke chat models with structured output, failing over on quota errors."""
+    """Invoke chat models with structured output, failing over on quota/timeouts."""
     models = iter_chat_models()
     if not models:
         raise HTTPException(
@@ -140,12 +144,18 @@ async def structured_invoke(schema: type, system: str, human: str):
     for name, llm in models:
         try:
             bound = llm.with_structured_output(schema)
-            return await bound.ainvoke(
-                [
-                    ("system", system),
-                    ("human", human),
-                ]
+            return await asyncio.wait_for(
+                bound.ainvoke(
+                    [
+                        ("system", system),
+                        ("human", human),
+                    ]
+                ),
+                timeout=_LLM_TIMEOUT_S,
             )
+        except asyncio.TimeoutError:
+            errors.append(f"{name}: timeout after {_LLM_TIMEOUT_S:.0f}s")
+            continue
         except Exception as exc:
             errors.append(f"{name}: {exc}")
             if _is_quota_error(exc):

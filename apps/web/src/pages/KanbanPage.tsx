@@ -55,7 +55,15 @@ function AgentAvatar({
   );
 }
 
-function DroppableColumn({ id, cards }: { id: KanbanColumn; cards: TaskCard[] }) {
+function DroppableColumn({
+  id,
+  cards,
+  allCards,
+}: {
+  id: KanbanColumn;
+  cards: TaskCard[];
+  allCards: TaskCard[];
+}) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
     <div
@@ -75,14 +83,14 @@ function DroppableColumn({ id, cards }: { id: KanbanColumn; cards: TaskCard[] })
       </div>
       <div className="flex flex-1 flex-col gap-2.5 px-2.5 pb-3">
         {cards.map((card) => (
-          <DraggableCard key={card.id} card={card} />
+          <DraggableCard key={card.id} card={card} allCards={allCards} />
         ))}
       </div>
     </div>
   );
 }
 
-function DraggableCard({ card }: { card: TaskCard }) {
+function DraggableCard({ card, allCards }: { card: TaskCard; allCards: TaskCard[] }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: card.id,
   });
@@ -92,16 +100,32 @@ function DraggableCard({ card }: { card: TaskCard }) {
   };
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
-      <CardBody card={card} />
+      <CardBody card={card} allCards={allCards} />
     </div>
   );
 }
 
-function CardBody({ card }: { card: TaskCard }) {
+function CardBody({ card, allCards = [] }: { card: TaskCard; allCards?: TaskCard[] }) {
   const working = WORKING_COLUMNS.has(card.column);
+  const kind = card.kind ?? (card.parent_id ? "work" : "epic");
+  const parent = card.parent_id ? allCards.find((c) => c.id === card.parent_id) : undefined;
   const agents = card.agents.length ? card.agents : working ? ["desenvolvedor"] : [];
+  const visibleTags = card.tags.filter((t) => t !== "epic" && t !== "work").slice(0, 2);
+
   return (
-    <div className="group rounded-xl border border-slate-200/80 bg-white p-3 shadow-[var(--shadow-card)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md">
+    <div
+      className={`group rounded-xl border bg-white p-3 shadow-[var(--shadow-card)] transition hover:-translate-y-0.5 hover:shadow-md ${
+        kind === "epic"
+          ? "border-indigo-200/90 hover:border-indigo-300"
+          : "border-slate-200/80 hover:border-blue-200"
+      }`}
+    >
+      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+        <Badge tone={kind === "epic" ? "accent" : "neutral"}>{kind === "epic" ? "Epic" : "Work"}</Badge>
+        <Badge tone={priorityTone(card.priority)}>
+          {PRIORITY_LABEL[card.priority] ?? card.priority}
+        </Badge>
+      </div>
       <div className="flex items-start justify-between gap-2">
         <Link
           to={`/cards/${card.id}`}
@@ -110,10 +134,10 @@ function CardBody({ card }: { card: TaskCard }) {
         >
           {card.title}
         </Link>
-        <Badge tone={priorityTone(card.priority)}>
-          {PRIORITY_LABEL[card.priority] ?? card.priority}
-        </Badge>
       </div>
+      {parent ? (
+        <p className="mt-1 text-[11px] font-semibold text-indigo-600/80">↳ {parent.title}</p>
+      ) : null}
       <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-slate-500">{card.description}</p>
 
       {agents.length ? (
@@ -132,7 +156,7 @@ function CardBody({ card }: { card: TaskCard }) {
       ) : null}
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        {card.tags.slice(0, 3).map((tag) => (
+        {visibleTags.map((tag) => (
           <Badge key={tag} tone="neutral">
             {tag}
           </Badge>
@@ -164,12 +188,6 @@ export function KanbanPage() {
   const [description, setDescription] = useState("");
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
-  useEffect(() => {
-    void refreshAll();
-    const id = window.setInterval(() => void refreshAll(), 4000);
-    return () => window.clearInterval(id);
-  }, [refreshAll]);
-
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return cards;
@@ -193,6 +211,14 @@ export function KanbanPage() {
   const activeCard = cards.find((c) => c.id === activeId) ?? null;
   const building = cards.filter((c) => WORKING_COLUMNS.has(c.column)).length;
   const live = cards.filter((c) => c.preview_url || c.column === "concluido").length;
+  const isBusy = building > 0;
+
+  useEffect(() => {
+    void refreshAll();
+    const intervalMs = isBusy ? 2000 : 4000;
+    const id = window.setInterval(() => void refreshAll(), intervalMs);
+    return () => window.clearInterval(id);
+  }, [refreshAll, isBusy]);
 
   async function onDragEnd(event: DragEndEvent) {
     setActiveId(null);
@@ -215,6 +241,11 @@ export function KanbanPage() {
     }
   }
 
+  function closeCreateModal() {
+    setModalOpen(false);
+    setCreating(false);
+  }
+
   async function createCard() {
     if (!title.trim()) return;
     setCreating(true);
@@ -229,7 +260,7 @@ export function KanbanPage() {
       setDescription("");
       setModalOpen(false);
       setToast("Task created — agents started triage");
-      await refreshAll();
+      void refreshAll();
     } catch (err) {
       setToast(err instanceof Error ? err.message : "Failed to create task");
     } finally {
@@ -271,9 +302,9 @@ export function KanbanPage() {
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-card)]">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-bold text-slate-800">Example robot agents</h2>
+          <h2 className="text-sm font-bold text-slate-800">Core robot agents</h2>
           <Link to="/agents" className="text-xs font-bold text-blue-600 hover:underline">
-            Open catalog
+            Browse {agents.length || 260}+ robots
           </Link>
         </div>
         <div className="flex gap-3 overflow-x-auto pb-1">
@@ -317,13 +348,18 @@ export function KanbanPage() {
       >
         <div className="flex gap-3 overflow-x-auto pb-6">
           {KANBAN_COLUMNS.map((column) => (
-            <DroppableColumn key={column} id={column} cards={byColumn[column]} />
+            <DroppableColumn
+              key={column}
+              id={column}
+              cards={byColumn[column]}
+              allCards={cards}
+            />
           ))}
         </div>
         <DragOverlay>
           {activeCard ? (
             <div className="w-[280px] rotate-1 scale-[1.03]">
-              <CardBody card={activeCard} />
+              <CardBody card={activeCard} allCards={cards} />
             </div>
           ) : null}
         </DragOverlay>
@@ -340,7 +376,7 @@ export function KanbanPage() {
                 </p>
               </div>
               <button
-                onClick={() => setModalOpen(false)}
+                onClick={closeCreateModal}
                 className="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 ✕
@@ -362,7 +398,7 @@ export function KanbanPage() {
               />
             </div>
             <div className="mt-5 flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setModalOpen(false)}>
+              <Button variant="ghost" onClick={closeCreateModal}>
                 Cancel
               </Button>
               <Button onClick={() => void createCard()} disabled={creating || !title.trim()}>

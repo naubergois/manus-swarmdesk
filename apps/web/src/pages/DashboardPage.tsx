@@ -23,7 +23,7 @@ export function DashboardPage() {
     <div className="space-y-6">
       <header className="max-w-3xl">
         <p className="text-sm font-bold uppercase tracking-[0.14em] text-blue-600">Operations</p>
-        <h1 className="mt-2 text-4xl font-extrabold tracking-tight sm:text-5xl">Manus SwarmDesk</h1>
+        <h1 className="mt-2 text-4xl font-extrabold tracking-tight sm:text-5xl">Mankiu</h1>
         <p className="mt-3 text-base text-slate-500">
           Executive view of the multi-agent software factory — builds, blockers, live apps, and cost.
         </p>

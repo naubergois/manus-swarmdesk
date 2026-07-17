@@ -40,7 +40,7 @@ export function PortalPage() {
   return (
     <div className="mx-auto grid max-w-5xl gap-5 lg:grid-cols-[1.2fr_0.8fr]">
       <Panel
-        title="Portal Manus"
+        title="Portal Mankiu"
         action={<Badge tone="accent">supervisor</Badge>}
         className="min-h-[70vh]"
       >

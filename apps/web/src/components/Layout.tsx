@@ -18,10 +18,10 @@ export function Layout() {
       <aside className="border-b border-slate-800 bg-slate-950 text-slate-100 lg:min-h-screen lg:border-b-0 lg:border-r lg:border-slate-800">
         <div className="px-5 py-6">
           <div className="flex items-center gap-3">
-            <img src="/icon.png" alt="Manus SwarmDesk" className="h-10 w-10 rounded-xl" />
+            <img src="/icon.png" alt="Mankiu" className="h-10 w-10 rounded-xl" />
             <div>
-              <div className="brand text-xl font-extrabold tracking-tight">Manus</div>
-              <div className="text-xs font-medium text-slate-400">SwarmDesk</div>
+              <div className="brand text-xl font-extrabold tracking-tight">Mankiu</div>
+              <div className="text-xs font-medium text-slate-400">Multi-agent factory</div>
             </div>
           </div>
           <p className="mt-4 text-sm leading-relaxed text-slate-400">

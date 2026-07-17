@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime
 
 from fastapi import HTTPException
@@ -23,6 +25,8 @@ from app.models.enums import (
     ApprovalType,
     KanbanColumn,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def list_cards(board_id: str | None = None) -> list[TaskCard]:
@@ -83,7 +87,31 @@ async def get_card_detail(card_id: str) -> CardDetail:
     )
 
 
-async def create_card(payload: CreateCardRequest, run_pipeline: bool = True) -> TaskCard:
+async def _run_pipeline_safe(card_id: str) -> None:
+    """Background triage/spec/plan — failures are audited on the card, not on the HTTP client."""
+    try:
+        card = await get_card(card_id)
+        await langgraph.receive_demand(card)
+    except Exception as exc:
+        logger.exception("LangGraph pipeline failed for %s: %s", card_id, exc)
+        try:
+            store = get_store()
+            raw = await store.get("task_cards", card_id)
+            if raw:
+                card = TaskCard.model_validate(raw)
+                card.tags = list({*card.tags, "pipeline_error"})
+                card.updated_at = datetime.utcnow()
+                await store.upsert("task_cards", card)
+        except Exception:
+            logger.exception("Failed to mark pipeline_error on %s", card_id)
+
+
+async def create_card(
+    payload: CreateCardRequest,
+    run_pipeline: bool = True,
+    *,
+    background: bool = True,
+) -> TaskCard:
     store = get_store()
     projects = await store.list("projects")
     boards = await store.list("kanban_boards")
@@ -102,15 +130,21 @@ async def create_card(payload: CreateCardRequest, run_pipeline: bool = True) -> 
         priority=payload.priority,
         autonomy_level=payload.autonomy_level,
         column=KanbanColumn.ENTRADA,
+        kind="epic",
+        tags=["epic"],
     )
     await store.upsert("task_cards", card)
     if run_pipeline:
-        try:
-            card = await langgraph.receive_demand(card)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Falha no pipeline LangGraph: {exc}") from exc
+        if background:
+            # Return immediately so the UI is not stuck on "Creating..." during LLM calls.
+            asyncio.create_task(_run_pipeline_safe(card.id))
+        else:
+            try:
+                card = await langgraph.receive_demand(card)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"Falha no pipeline LangGraph: {exc}") from exc
     return card
 
 
@@ -127,6 +161,7 @@ async def handle_chat(payload: ChatRequest) -> ChatResponse:
             project_id=payload.project_id,
         ),
         run_pipeline=True,
+        background=False,
     )
 
     try:
