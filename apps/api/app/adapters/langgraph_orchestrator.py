@@ -14,11 +14,12 @@ from app.db import get_store
 from app.models.contracts import (
     AuditEvent,
     ExecutionPlan,
+    HumanApproval,
     PlanTask,
     RequirementSpecification,
     TaskCard,
 )
-from app.models.enums import KanbanColumn
+from app.models.enums import ApprovalDecision, ApprovalType, KanbanColumn
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +41,13 @@ class LangGraphOrchestrator:
         graph.add_node("classify", self._node_classify)
         graph.add_node("refine", self._node_refine)
         graph.add_node("plan", self._node_plan)
-        graph.add_node("launch_swarm", self._node_launch_swarm)
+        graph.add_node("request_approval", self._node_request_approval)
 
         graph.add_edge(START, "classify")
         graph.add_edge("classify", "refine")
         graph.add_edge("refine", "plan")
-        graph.add_edge("plan", "launch_swarm")
-        graph.add_edge("launch_swarm", END)
+        graph.add_edge("plan", "request_approval")
+        graph.add_edge("request_approval", END)
         return graph.compile()
 
     async def receive_demand(self, card: TaskCard) -> TaskCard:
@@ -173,8 +174,63 @@ class LangGraphOrchestrator:
         await store.upsert("execution_plans", plan)
         await store.upsert("task_cards", card)
 
+        # Work cards are materialised only after human scope approval — never auto-spawn.
+        await self._audit(
+            card,
+            "plan_execution",
+            KanbanColumn.REFINAMENTO.value,
+            KanbanColumn.REFINAMENTO.value,
+            {"tasks": len(tasks), "child_ids": []},
+        )
+        return {
+            "card": card.model_dump(mode="json"),
+            "plan": plan.model_dump(mode="json"),
+        }
+
+    async def _node_request_approval(self, state: PipelineState) -> PipelineState:
+        """Pause for human scope approval before swarm / work cards / app deploy."""
+        store = get_store()
+        card = TaskCard.model_validate(state["card"])
+        previous = card.column
+        card.column = KanbanColumn.AGUARDANDO_APROVACAO
+        card.kind = "epic"
+        card.tags = list({*card.tags, "epic", "awaiting_approval"})
+        card.updated_at = datetime.utcnow()
+        await store.upsert("task_cards", card)
+
+        approval = HumanApproval(
+            card_id=card.id,
+            type=ApprovalType.ESCOPO,
+            requester="supervisor",
+            decision=ApprovalDecision.PENDENTE,
+            comment=(
+                "Escopo e plano prontos. Aprove para criar os cartões de trabalho "
+                "e liberar o enxame para construir/deployar a aplicação."
+            ),
+        )
+        await store.upsert("approvals", approval)
+        await self._audit(
+            card,
+            "request_scope_approval",
+            previous.value,
+            card.column.value,
+            {"approval_id": approval.id, "auto": False},
+        )
+        return {"card": card.model_dump(mode="json")}
+
+    async def materialize_work_cards(self, card: TaskCard) -> list[str]:
+        """Create child work cards from the execution plan (idempotent)."""
+        store = get_store()
+        existing = await store.list("task_cards", {"parent_id": card.id})
+        if existing:
+            return [row["id"] for row in existing]
+
+        plans = await store.list("execution_plans", {"card_id": card.id})
+        if not plans:
+            return []
+        plan = ExecutionPlan.model_validate(plans[-1])
         child_ids: list[str] = []
-        for task in tasks:
+        for task in plan.tasks:
             child = TaskCard(
                 title=task.title,
                 description=(
@@ -197,41 +253,23 @@ class LangGraphOrchestrator:
             )
             await store.upsert("task_cards", child)
             child_ids.append(child.id)
-            # Stagger so the board poll can show cards appearing one by one.
-            await asyncio.sleep(0.55)
+            await asyncio.sleep(0.9)
+        return child_ids
 
-        await self._audit(
-            card,
-            "plan_execution",
-            KanbanColumn.REFINAMENTO.value,
-            KanbanColumn.REFINAMENTO.value,
-            {"tasks": len(tasks), "child_ids": child_ids},
-        )
-        return {
-            "card": card.model_dump(mode="json"),
-            "plan": plan.model_dump(mode="json"),
-        }
-
-    async def _node_launch_swarm(self, state: PipelineState) -> PipelineState:
-        """Skip scope approval — move epic to Pronto Enxame and start Ruflo in background."""
+    async def start_swarm_after_approval(self, card_id: str) -> TaskCard:
+        """Materialize work cards and start Ruflo in the background after scope approval."""
         store = get_store()
-        card = TaskCard.model_validate(state["card"])
-        previous = card.column
+        raw = await store.get("task_cards", card_id)
+        if not raw:
+            raise RuntimeError(f"Card {card_id} not found")
+        card = TaskCard.model_validate(raw)
         card.column = KanbanColumn.PRONTO_ENXAME
-        card.kind = "epic"
         card.tags = list({*card.tags, "epic", "swarm_queued"})
         card.updated_at = datetime.utcnow()
         await store.upsert("task_cards", card)
-        await self._audit(
-            card,
-            "launch_swarm",
-            previous.value,
-            card.column.value,
-            {"auto": True},
-        )
-
+        await self.materialize_work_cards(card)
         asyncio.create_task(self._run_swarm_safe(card.id))
-        return {"card": card.model_dump(mode="json")}
+        return card
 
     async def _run_swarm_safe(self, card_id: str) -> None:
         from app.adapters.ruflo_swarm import ruflo

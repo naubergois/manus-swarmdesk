@@ -42,7 +42,7 @@ from app.models.enums import (
     TicketStatus,
 )
 
-_CHILD_MOVE_DELAY_S = 0.65
+_CHILD_MOVE_DELAY_S = 1.05
 
 
 class SwarmState(TypedDict, total=False):

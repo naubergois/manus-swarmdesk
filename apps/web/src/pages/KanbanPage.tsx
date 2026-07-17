@@ -70,13 +70,13 @@ function AgentAvatar({
   id,
   working = false,
   celebrating = false,
-  celebrateDelayMs = 0,
+  motionDelayMs = 0,
   size = "md",
 }: {
   id: string;
   working?: boolean;
   celebrating?: boolean;
-  celebrateDelayMs?: number;
+  motionDelayMs?: number;
   size?: "sm" | "md";
 }) {
   const agent = agentVisual(id);
@@ -93,7 +93,7 @@ function AgentAvatar({
       style={{
         background: `${agent.color}22`,
         color: agent.color,
-        animationDelay: celebrating ? `${celebrateDelayMs}ms` : undefined,
+        animationDelay: `${motionDelayMs}ms`,
       }}
     >
       <span aria-hidden>{agent.emoji}</span>
@@ -208,12 +208,18 @@ function CardBody({
   const working = WORKING_COLUMNS.has(card.column);
   const kind = card.kind ?? (card.parent_id ? "work" : "epic");
   const parent = card.parent_id ? allCards.find((c) => c.id === card.parent_id) : undefined;
+  const children =
+    kind === "epic"
+      ? allCards
+          .filter((c) => c.parent_id === card.id)
+          .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      : [];
   const agents = card.agents.length ? card.agents : working ? ["desenvolvedor"] : [];
   const visibleTags = card.tags.filter((t) => t !== "epic" && t !== "work").slice(0, 2);
 
   return (
     <div
-      className={`group rounded-xl border bg-white shadow-[var(--shadow-card)] transition hover:-translate-y-0.5 hover:shadow-md ${
+      className={`group board-card-enter rounded-xl border bg-white shadow-[var(--shadow-card)] transition hover:-translate-y-0.5 hover:shadow-md ${
         compact ? "p-2" : "p-3"
       } ${
         selected
@@ -273,23 +279,80 @@ function CardBody({
 
       {agents.length ? (
         <div className="mt-2.5 flex items-center justify-between gap-2">
-          <div className="flex -space-x-1.5">
+          <div
+            className={`flex flex-wrap items-center ${
+              working ? "gap-2 agent-row-spreading" : "gap-1.5"
+            }`}
+          >
             {agents.slice(0, 4).map((id, i) => (
               <AgentAvatar
                 key={id}
                 id={id}
                 working={working}
                 celebrating={celebrating}
-                celebrateDelayMs={i * 70}
+                motionDelayMs={i * (working ? 220 : 90)}
                 size="sm"
               />
             ))}
           </div>
           {working ? (
-            <span className="text-[10px] font-bold uppercase tracking-wide text-blue-600">
+            <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-blue-600">
               Building
             </span>
           ) : null}
+        </div>
+      ) : null}
+
+      {!compact && children.length ? (
+        <div className="mt-2.5 space-y-1.5 border-t border-dashed border-slate-200/90 pt-2">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+            Work · {children.length}
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {children.slice(0, 5).map((child, i) => {
+              const childWorking = WORKING_COLUMNS.has(child.column);
+              const childAgent = child.agents[0];
+              return (
+                <Link
+                  key={child.id}
+                  to={`/cards/${child.id}`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className={`board-subcard flex items-center gap-1.5 rounded-lg border bg-slate-50/90 px-2 py-1.5 transition hover:border-blue-200 hover:bg-white ${
+                    childWorking
+                      ? "border-blue-200 shadow-sm"
+                      : child.column === "concluido" || child.column === "pronto_entrega"
+                        ? "border-emerald-200"
+                        : "border-slate-200/80"
+                  }`}
+                  style={{ animationDelay: `${i * 120}ms` }}
+                >
+                  {childAgent ? (
+                    <AgentAvatar
+                      id={childAgent}
+                      working={childWorking}
+                      motionDelayMs={i * 180}
+                      size="sm"
+                    />
+                  ) : (
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-500">
+                      {i + 1}
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-700">
+                    {child.title}
+                  </span>
+                  <Badge tone={childWorking ? "info" : "neutral"}>
+                    {COLUMN_SHORT_LABELS[child.column]}
+                  </Badge>
+                </Link>
+              );
+            })}
+            {children.length > 5 ? (
+              <p className="px-1 text-[10px] font-semibold text-slate-400">
+                +{children.length - 5} more work items
+              </p>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -399,24 +462,6 @@ export function KanbanPage() {
     return () => window.clearTimeout(timer);
   }, [celebrating]);
 
-  const SWARM_CARD_COLUMNS = new Set<KanbanColumn>([
-    "pronto_enxame",
-    "em_execucao",
-    "em_revisao",
-    "em_testes",
-    "bloqueado",
-    "aguardando_aprovacao",
-  ]);
-
-  const SWARM_CARD_COLUMNS = new Set<KanbanColumn>([
-    "pronto_enxame",
-    "em_execucao",
-    "em_revisao",
-    "em_testes",
-    "bloqueado",
-    "aguardando_aprovacao",
-  ]);
-
   const activeMission = useMemo(() => {
     const running = missions.find((m) => RUNNING_SWARM_STATUSES.includes(m.status));
     if (running) return running;
@@ -493,7 +538,7 @@ export function KanbanPage() {
 
   useEffect(() => {
     void refreshAll();
-    const intervalMs = isBusy ? 2000 : 4000;
+    const intervalMs = isBusy ? 900 : 4000;
     const id = window.setInterval(() => void refreshAll(), intervalMs);
     return () => window.clearInterval(id);
   }, [refreshAll, isBusy]);
@@ -753,7 +798,7 @@ export function KanbanPage() {
                 id={agent.id}
                 size="sm"
                 celebrating={celebrating}
-                celebrateDelayMs={i * 80}
+                motionDelayMs={i * 80}
               />
               <span className="text-[10px] font-bold text-slate-700">{agent.name}</span>
             </div>

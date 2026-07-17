@@ -28,7 +28,7 @@ export function PortalPage() {
     try {
       const res = await api.chat.send(text);
       setMessages(res.messages);
-      setToast("Demanda registrada e triada");
+      setToast("Demanda registrada — aguardando aprovação do escopo");
       await refreshAll();
     } catch (err) {
       setToast(err instanceof Error ? err.message : "Falha no portal");

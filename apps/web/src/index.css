@@ -71,11 +71,11 @@ select {
 @keyframes agentPulse {
   0%,
   100% {
-    transform: scale(1);
+    transform: scale(1) translateY(0);
     box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35);
   }
   50% {
-    transform: scale(1.05);
+    transform: scale(1.08) translateY(-2px);
     box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
   }
 }
@@ -96,6 +96,50 @@ select {
 
 .agent-float {
   animation: floaty 2.4s ease-in-out infinite;
+}
+
+.agent-row-spreading {
+  animation: agentRowSpread 2.4s ease-in-out infinite;
+}
+
+@keyframes agentRowSpread {
+  0%,
+  100% {
+    column-gap: 0.5rem;
+  }
+  50% {
+    column-gap: 0.85rem;
+  }
+}
+
+.board-card-enter {
+  animation: boardCardIn 0.4s ease both;
+}
+
+@keyframes boardCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.board-subcard {
+  animation: boardSubcardIn 0.45s ease both;
+}
+
+@keyframes boardSubcardIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
 }
 
 @keyframes agentCelebrate {
@@ -128,6 +172,12 @@ select {
 @media (prefers-reduced-motion: reduce) {
   .agent-celebrate {
     animation: agentPulse 1.2s ease-in-out infinite;
+  }
+
+  .agent-row-spreading,
+  .board-card-enter,
+  .board-subcard {
+    animation: none;
   }
 }
 

@@ -1,10 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Badge, Button, EmptyState, Panel, Stat } from "../components/ui";
 import { useAppStore } from "../store";
+import type { KanbanColumn } from "../types";
 
 const RUNNING_STATUSES = ["running", "coordinating", "executing"];
+const SWARM_CARD_COLUMNS = new Set<KanbanColumn>([
+  "pronto_enxame",
+  "em_execucao",
+  "em_revisao",
+  "em_testes",
+  "bloqueado",
+  "aguardando_aprovacao",
+]);
 
 export function SwarmPage() {
   const { missions, cards, refreshAll, setToast } = useAppStore();
@@ -22,22 +31,55 @@ export function SwarmPage() {
   );
   const selected = active[0] ?? missions[0];
   const card = selected ? cards.find((c) => c.id === selected.card_id) : null;
-  const canStopSelected = selected ? RUNNING_STATUSES.includes(selected.status) : false;
-  const canStartSelected = selected ? !RUNNING_STATUSES.includes(selected.status) : false;
 
-  const runAction = async (action: "start" | "stop") => {
-    if (!selected) return;
-    if (action === "stop" && !canStopSelected) return;
-    if (action === "start" && !canStartSelected) return;
+  const swarmTargetCard = useMemo(() => {
+    if (card) return card;
+    return (
+      cards.find(
+        (c) =>
+          (c.kind ?? (c.parent_id ? "work" : "epic")) === "epic" &&
+          SWARM_CARD_COLUMNS.has(c.column),
+      ) ?? null
+    );
+  }, [card, cards]);
 
-    setBusyMissionId(selected.id);
+  const canStopSelected = selected
+    ? RUNNING_STATUSES.includes(selected.status)
+    : Boolean(
+        swarmTargetCard &&
+          ["pronto_enxame", "em_execucao", "em_revisao", "em_testes"].includes(
+            swarmTargetCard.column,
+          ),
+      );
+  const canStartSelected = selected
+    ? !RUNNING_STATUSES.includes(selected.status)
+    : Boolean(swarmTargetCard);
+
+  const runAction = async (action: "start" | "stop", missionId?: string, cardId?: string) => {
+    const targetMission = missionId
+      ? missions.find((m) => m.id === missionId)
+      : selected;
+    const targetCardId =
+      cardId ??
+      targetMission?.card_id ??
+      swarmTargetCard?.id ??
+      null;
+
+    if (action === "stop" && !canStopSelected && !missionId) return;
+    if (action === "start" && !canStartSelected && !missionId) return;
+    if (!targetMission && !targetCardId) return;
+
+    const busyKey = targetMission?.id ?? targetCardId ?? "swarm";
+    setBusyMissionId(busyKey);
     setBusyAction(action);
     try {
       if (action === "stop") {
-        await api.swarm.stop(selected.id);
+        if (targetCardId) await api.swarm.stopCard(targetCardId);
+        else if (targetMission) await api.swarm.stop(targetMission.id);
         setToast("Enxame parado");
       } else {
-        await api.swarm.start(selected.id);
+        if (targetCardId) await api.swarm.startCard(targetCardId);
+        else if (targetMission) await api.swarm.start(targetMission.id);
         setToast("Enxame iniciado");
       }
       await refreshAll();
@@ -55,16 +97,36 @@ export function SwarmPage() {
     }
   };
 
+  const headerBusy = busyMissionId !== null;
+
   return (
     <div className="space-y-5">
-      <header>
-        <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--accent)]">
-          Ruflo
-        </p>
-        <h1 className="mt-2 text-4xl font-semibold tracking-tight">Central do enxame</h1>
-        <p className="mt-2 max-w-2xl text-[var(--muted)]">
-          Topologia hierárquica, agentes ativos, progresso e bloqueios da missão atual.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--accent)]">
+            Ruflo
+          </p>
+          <h1 className="mt-2 text-4xl font-semibold tracking-tight">Central do enxame</h1>
+          <p className="mt-2 max-w-2xl text-[var(--muted)]">
+            Topologia hierárquica, agentes ativos, progresso e bloqueios da missão atual.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 pt-2">
+          <Button
+            variant="primary"
+            onClick={() => void runAction("start")}
+            disabled={!canStartSelected || headerBusy}
+          >
+            {busyAction === "start" && headerBusy ? "Iniciando..." : "Start"}
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => void runAction("stop")}
+            disabled={!canStopSelected || headerBusy}
+          >
+            {busyAction === "stop" && headerBusy ? "Parando..." : "Stop"}
+          </Button>
+        </div>
       </header>
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -79,7 +141,11 @@ export function SwarmPage() {
       {!selected ? (
         <EmptyState
           title="Nenhum enxame formado"
-          body="Aprove um cartão em Aguardando aprovação para disparar o enxame de agentes."
+          body={
+            swarmTargetCard
+              ? `Use Start para lançar o enxame do card "${swarmTargetCard.title}".`
+              : "Aprove um cartão em Aguardando aprovação ou use Start quando houver um epic elegível."
+          }
         />
       ) : (
         <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
@@ -179,6 +245,11 @@ export function SwarmPage() {
 
       <Panel title="Todas as missões">
         <div className="space-y-2">
+          {missions.length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">
+              Nenhuma missão ainda. Use Start no topo para lançar o enxame de um epic elegível.
+            </p>
+          ) : null}
           {missions.map((mission) => {
             const canStop = RUNNING_STATUSES.includes(mission.status);
             const canStart = !RUNNING_STATUSES.includes(mission.status);
@@ -200,20 +271,7 @@ export function SwarmPage() {
                     variant="soft"
                     className="!px-3 !py-1.5 text-xs"
                     disabled={!canStart || busy}
-                    onClick={async () => {
-                      setBusyMissionId(mission.id);
-                      setBusyAction("start");
-                      try {
-                        await api.swarm.start(mission.id);
-                        setToast("Enxame iniciado");
-                        await refreshAll();
-                      } catch (err) {
-                        setToast(err instanceof Error ? err.message : "Falha ao iniciar o enxame");
-                      } finally {
-                        setBusyMissionId(null);
-                        setBusyAction(null);
-                      }
-                    }}
+                    onClick={() => void runAction("start", mission.id, mission.card_id)}
                   >
                     {busy && busyAction === "start" ? "..." : "Start"}
                   </Button>
@@ -221,20 +279,7 @@ export function SwarmPage() {
                     variant="danger"
                     className="!px-3 !py-1.5 text-xs"
                     disabled={!canStop || busy}
-                    onClick={async () => {
-                      setBusyMissionId(mission.id);
-                      setBusyAction("stop");
-                      try {
-                        await api.swarm.stop(mission.id);
-                        setToast("Enxame parado");
-                        await refreshAll();
-                      } catch (err) {
-                        setToast(err instanceof Error ? err.message : "Falha ao parar o enxame");
-                      } finally {
-                        setBusyMissionId(null);
-                        setBusyAction(null);
-                      }
-                    }}
+                    onClick={() => void runAction("stop", mission.id, mission.card_id)}
                   >
                     {busy && busyAction === "stop" ? "..." : "Stop"}
                   </Button>

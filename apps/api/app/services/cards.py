@@ -7,7 +7,6 @@ from datetime import datetime
 from fastapi import HTTPException
 
 from app.adapters.langgraph_orchestrator import langgraph
-from app.adapters.ruflo_swarm import ruflo
 from app.agents import runners
 from app.db import get_store
 from app.models.contracts import (
@@ -266,7 +265,8 @@ async def handle_chat(payload: ChatRequest) -> ChatResponse:
         reply = (
             f"Criei o cartão **{card.title}** e avancei até **{card.column.value}**. "
             f"Tipo: {card.type.value}, prioridade: {card.priority.value}. "
-            "Revise o escopo em Aprovações para liberar o enxame."
+            "Revise o escopo em Aprovações — só então o enxame cria cartões de trabalho "
+            "e constrói a aplicação."
         )
 
     assistant = ChatMessage(role="assistant", content=reply, card_id=card.id)
@@ -303,16 +303,12 @@ async def decide_approval(approval_id: str, action: ApprovalAction) -> HumanAppr
 
     if action.decision == ApprovalDecision.APROVADO:
         if approval.type == ApprovalType.ESCOPO:
-            card.column = KanbanColumn.PRONTO_ENXAME
-            card.updated_at = datetime.utcnow()
-            await store.upsert("task_cards", card)
             try:
-                await ruflo.create_mission(card)
-                card = await ruflo.execute(card)
+                card = await langgraph.start_swarm_after_approval(card.id)
             except HTTPException:
                 raise
             except Exception as exc:
-                raise HTTPException(status_code=502, detail=f"Falha no enxame: {exc}") from exc
+                raise HTTPException(status_code=502, detail=f"Falha ao liberar o enxame: {exc}") from exc
         elif approval.type == ApprovalType.ENTREGA:
             card.column = KanbanColumn.CONCLUIDO
             card.updated_at = datetime.utcnow()
