@@ -4,8 +4,9 @@ from datetime import datetime
 
 from fastapi import HTTPException
 
-from app.adapters.langgraph_stub import langgraph
-from app.adapters.ruflo_stub import ruflo
+from app.adapters.langgraph_orchestrator import langgraph
+from app.adapters.ruflo_swarm import ruflo
+from app.agents import runners
 from app.db import get_store
 from app.models.contracts import (
     ApprovalAction,
@@ -58,6 +59,7 @@ async def get_card_detail(card_id: str) -> CardDetail:
     timeline = sorted(timeline, key=lambda e: e.get("created_at", ""))
 
     from app.models.contracts import (
+        AuditEvent,
         ExecutionPlan,
         RequirementSpecification,
         ReviewDecision,
@@ -65,7 +67,6 @@ async def get_card_detail(card_id: str) -> CardDetail:
         SwarmMission,
         TestResult,
         WorkArtifact,
-        AuditEvent,
     )
 
     return CardDetail(
@@ -104,7 +105,12 @@ async def create_card(payload: CreateCardRequest, run_pipeline: bool = True) -> 
     )
     await store.upsert("task_cards", card)
     if run_pipeline:
-        card = await langgraph.receive_demand(card)
+        try:
+            card = await langgraph.receive_demand(card)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Falha no pipeline LangGraph: {exc}") from exc
     return card
 
 
@@ -123,12 +129,26 @@ async def handle_chat(payload: ChatRequest) -> ChatResponse:
         run_pipeline=True,
     )
 
-    reply = (
-        f"Criei o cartão **{card.title}** e avancei até "
-        f"**{card.column.value}**. Tipo sugerido: {card.type.value}, "
-        f"prioridade: {card.priority.value}. "
-        "Revise o escopo em Aprovações para liberar o enxame."
-    )
+    try:
+        supervisor = await runners.run_supervisor_reply(
+            payload.message,
+            card.title,
+            card.column.value,
+            card.type.value,
+            card.priority.value,
+        )
+        reply = supervisor.reply
+        if supervisor.suggested_title and supervisor.suggested_title != card.title:
+            card.title = supervisor.suggested_title[:120]
+            card.updated_at = datetime.utcnow()
+            await store.upsert("task_cards", card)
+    except Exception:
+        reply = (
+            f"Criei o cartão **{card.title}** e avancei até **{card.column.value}**. "
+            f"Tipo: {card.type.value}, prioridade: {card.priority.value}. "
+            "Revise o escopo em Aprovações para liberar o enxame."
+        )
+
     assistant = ChatMessage(role="assistant", content=reply, card_id=card.id)
     await store.insert("conversations", assistant)
     messages = [ChatMessage.model_validate(m) for m in await store.list("conversations")]
@@ -166,8 +186,13 @@ async def decide_approval(approval_id: str, action: ApprovalAction) -> HumanAppr
             card.column = KanbanColumn.PRONTO_ENXAME
             card.updated_at = datetime.utcnow()
             await store.upsert("task_cards", card)
-            await ruflo.create_mission(card)
-            card = await ruflo.execute(card)
+            try:
+                await ruflo.create_mission(card)
+                card = await ruflo.execute(card)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"Falha no enxame: {exc}") from exc
         elif approval.type == ApprovalType.ENTREGA:
             card.column = KanbanColumn.CONCLUIDO
             card.updated_at = datetime.utcnow()
@@ -190,7 +215,6 @@ async def approve_card(card_id: str, action: ApprovalAction) -> HumanApproval:
     ]
     if not pending:
         raise HTTPException(status_code=404, detail="Nenhuma aprovação pendente")
-    # Prefer delivery approval if card is ready, else latest pending
     card = await get_card(card_id)
     if card.column == KanbanColumn.PRONTO_ENTREGA:
         target = next((a for a in pending if a.type == ApprovalType.ENTREGA), pending[-1])

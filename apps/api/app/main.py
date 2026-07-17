@@ -38,4 +38,22 @@ app.include_router(dashboard.router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "manus-swarmdesk"}
+    from app.config import settings
+    from app.llm import active_provider_info
+
+    try:
+        info = active_provider_info()
+        llm_ready = True
+    except Exception:
+        info = {"provider": "none", "model": None}
+        llm_ready = False
+    return {
+        "status": "ok",
+        "service": "manus-swarmdesk",
+        "llm_ready": llm_ready,
+        "llm_provider": info["provider"],
+        "llm_model": info["model"],
+        "llm_provider_preference": settings.llm_provider,
+        "orchestration": "langgraph+langchain",
+        "swarm": "hierarchical-ruflo-style",
+    }

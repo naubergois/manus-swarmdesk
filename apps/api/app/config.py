@@ -13,5 +13,25 @@ class Settings(BaseSettings):
     ]
     use_memory_store: bool = False
 
+    # Preferred provider: auto | anthropic | google | openai | xai
+    llm_provider: str = "auto"
+
+    anthropic_api_key: str = ""
+    llm_model: str = "claude-sonnet-4-5"
+
+    google_api_key: str = ""
+    gemini_api_key: str = ""
+    google_model: str = "gemini-2.0-flash"
+
+    openai_api_key: str = ""
+    openai_base_url: str = ""
+    openai_model: str = "gpt-4.1-mini"
+
+    xai_api_key: str = ""
+    xai_model: str = "grok-3-mini"
+
+    llm_temperature: float = 0.2
+    llm_max_tokens: int = 4096
+
 
 settings = Settings()

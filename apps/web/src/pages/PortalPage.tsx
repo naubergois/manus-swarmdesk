@@ -102,7 +102,7 @@ export function PortalPage() {
         <Panel title="O que o portal faz">
           <ul className="space-y-3 text-sm leading-relaxed text-[var(--muted)]">
             <li>Cria cartão a partir de linguagem natural</li>
-            <li>Dispara triagem, requisitos e plano via LangGraph stub</li>
+            <li>Dispara triagem, requisitos e plano via LangGraph + LLM</li>
             <li>Pausa em aprovação humana antes do enxame</li>
             <li>Explica o estado atual e aponta o próximo passo</li>
           </ul>

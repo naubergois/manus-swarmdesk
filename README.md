@@ -48,8 +48,8 @@ The platform creates a card, classifies it, produces requirements and acceptance
 | Layer | Responsibility |
 | --- | --- |
 | **Experience** | Dashboard, Kanban, Portal chat, Swarm console, Approvals, Tickets, Agents, Projects |
-| **Control** | LangGraph orchestrator (stub), Kanban transitions, approvals, audit |
-| **Execution** | Ruflo swarm manager (stub), agents, artifacts, tests |
+| **Control** | LangGraph orchestrator + LangChain agents, Kanban transitions, approvals, audit |
+| **Execution** | Hierarchical swarm (Ruflo-style) with real LLM specialists, artifacts, tests |
 | **Contracts** | Pydantic / TypeScript models for every critical exchange |
 | **Data** | MongoDB (or in-memory store for local demo), optional Redis |
 
@@ -61,8 +61,8 @@ Portal / Kanban (React)
         │
    ┌────┴────┐
    ▼         ▼
-LangGraph   Ruflo
-  stub       stub
+LangGraph   Swarm
+  + LLM      agents
    │         │
    └────┬────┘
         ▼
@@ -87,7 +87,7 @@ LangGraph   Ruflo
 
 - **Frontend:** Vite, React 19, TypeScript, Tailwind CSS, React Router, `@dnd-kit`, Zustand
 - **Backend:** FastAPI, Pydantic v2, Motor (MongoDB)
-- **Orchestration (MVP):** LangGraph and Ruflo **adapters (stubs)** — real integrations can replace them later
+- **Orchestration:** real **LangGraph** pipeline + **LangChain** agents (Anthropic). Hierarchical swarm follows Ruflo-style topology
 - **Infra:** Docker Compose for MongoDB + Redis
 
 ## Repository structure
@@ -122,6 +122,8 @@ uvicorn app.main:app --reload --port 8000
 
 By default `USE_MEMORY_STORE=true` (see `apps/api/.env`) so you can run **without MongoDB**.
 
+**Required:** configure at least one LLM key in `apps/api/.env` (see `.env.example`): `XAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`. The API auto-selects a provider and fails over on quota errors.
+
 To use MongoDB:
 
 ```bash
@@ -146,7 +148,7 @@ Open [http://localhost:5173](http://localhost:5173). The Vite proxy forwards `/a
 1. Open **Portal** and describe a demand in natural language.
 2. The card moves through triage → refinement → **Awaiting approval**.
 3. Approve in **Approvals** or in the card detail.
-4. The swarm stub executes, reviews, and tests until **Ready for delivery**.
+4. The swarm executes (developer → reviewer → tester → docs) until **Ready for delivery**.
 5. Approve delivery to mark the card **Completed**.
 
 ## Kanban columns
@@ -159,7 +161,7 @@ Supervisor, Triage, Requirements, Planner, Architect, Swarm Coordinator, Develop
 
 ## Important MVP notes
 
-- LangGraph / Ruflo are **stubs** that advance the pipeline and generate structured artifacts.
+- Agents call a real LLM (xAI / Gemini / OpenAI / Anthropic) with structured Pydantic outputs. No mock content.
 - GitHub / real LLM / RAG integrations are prepared via adapters but not wired for production yet.
 - Transition rules enforce acceptance criteria before execution and tests before delivery.
 
@@ -195,8 +197,8 @@ MIT — see repository for details.
 | 层级 | 职责 |
 | --- | --- |
 | **体验层** | 仪表盘、看板、门户聊天、群组控制台、审批、工单、智能体、项目 |
-| **控制层** | LangGraph 编排（桩实现）、看板流转、审批、审计 |
-| **执行层** | Ruflo 群组管理（桩实现）、智能体、产物、测试 |
+| **控制层** | LangGraph + LangChain 真实智能体、看板流转、审批、审计 |
+| **执行层** | 分层群组（Ruflo 风格）+ 真实 LLM 专家、产物、测试 |
 | **契约层** | 关键交换使用 Pydantic / TypeScript 模型 |
 | **数据层** | MongoDB（或本地内存演示存储）、可选 Redis |
 
@@ -218,7 +220,7 @@ MIT — see repository for details.
 
 - **前端：** Vite、React 19、TypeScript、Tailwind CSS、React Router、`@dnd-kit`、Zustand
 - **后端：** FastAPI、Pydantic v2、Motor（MongoDB）
-- **编排（MVP）：** LangGraph / Ruflo **适配器（桩实现）**，后续可替换为真实集成
+- **编排：** 真实 **LangGraph** + **LangChain**（Anthropic）。分层群组采用 Ruflo 风格拓扑
 - **基础设施：** Docker Compose（MongoDB + Redis）
 
 ## 仓库结构
@@ -277,7 +279,7 @@ npm run dev
 1. 打开 **Portal（门户）**，用自然语言描述需求。
 2. 卡片依次进入分诊 → 细化 → **等待审批**。
 3. 在 **Approvals（审批）** 或卡片详情中批准。
-4. 群组桩实现执行、评审、测试，直到 **准备交付**。
+4. 群组执行（开发 → 评审 → 测试 → 文档）直到 **准备交付**。
 5. 批准交付后，卡片变为 **已完成**。
 
 ## 看板列
@@ -290,7 +292,7 @@ npm run dev
 
 ## MVP 说明
 
-- LangGraph / Ruflo 当前为**桩实现**，用于推进流水线并生成结构化产物。
+- 智能体通过真实 LLM（xAI / Gemini / OpenAI / Anthropic）生成结构化 Pydantic 输出，无 mock。
 - GitHub / 真实大模型 / RAG 等通过适配器预留，尚未接入生产环境。
 - 流转规则：进入执行前必须有验收标准；交付前必须有测试结果。
 
@@ -326,8 +328,8 @@ A plataforma cria o cartão, classifica a demanda, gera requisitos e critérios 
 | Camada | Responsabilidade |
 | --- | --- |
 | **Experiência** | Dashboard, Kanban, Portal, Enxame, Aprovações, Chamados, Agentes, Projetos |
-| **Controle** | Orquestrador LangGraph (stub), transições do Kanban, aprovações, auditoria |
-| **Execução** | Swarm Manager Ruflo (stub), agentes, artefatos, testes |
+| **Controle** | Orquestrador LangGraph + agentes LangChain, transições, aprovações, auditoria |
+| **Execução** | Enxame hierárquico (estilo Ruflo) com especialistas LLM reais |
 | **Contratos** | Modelos Pydantic / TypeScript em toda troca crítica |
 | **Dados** | MongoDB (ou store em memória para demo local), Redis opcional |
 
@@ -349,7 +351,7 @@ A plataforma cria o cartão, classifica a demanda, gera requisitos e critérios 
 
 - **Frontend:** Vite, React 19, TypeScript, Tailwind CSS, React Router, `@dnd-kit`, Zustand
 - **Backend:** FastAPI, Pydantic v2, Motor (MongoDB)
-- **Orquestração (MVP):** adaptadores **stub** de LangGraph e Ruflo — prontos para troca futura
+- **Orquestração:** **LangGraph** + **LangChain** reais (Anthropic). Enxame hierárquico estilo Ruflo
 - **Infra:** Docker Compose para MongoDB + Redis
 
 ## Estrutura do repositório
@@ -408,7 +410,7 @@ Abra [http://localhost:5173](http://localhost:5173). O proxy do Vite encaminha `
 1. Abra o **Portal** e descreva uma demanda em linguagem natural.
 2. O cartão passa por triagem → refinamento → **Aguardando aprovação**.
 3. Aprove em **Aprovações** ou no detalhe do cartão.
-4. O enxame stub executa, revisa e testa até **Pronto para entrega**.
+4. O enxame executa (dev → revisor → testes → docs) até **Pronto para entrega**.
 5. Aprove a entrega para marcar o cartão como **Concluído**.
 
 ## Colunas do Kanban
@@ -421,7 +423,7 @@ Supervisor, Triagem, Requisitos, Planejador, Arquiteto, Coordenador do enxame, D
 
 ## Observações importantes do MVP
 
-- LangGraph / Ruflo são **stubs** que avançam o pipeline e geram artefatos estruturados.
+- Os agentes chamam um LLM real (xAI / Gemini / OpenAI / Anthropic) com saídas Pydantic estruturadas. Sem mock.
 - Integrações reais com GitHub / LLM / RAG estão preparadas via adaptadores, mas ainda não em produção.
 - As regras de transição exigem critérios de aceitação antes da execução e testes antes da entrega.
 

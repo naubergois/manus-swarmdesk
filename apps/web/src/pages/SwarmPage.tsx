@@ -42,7 +42,7 @@ export function SwarmPage() {
       {!selected ? (
         <EmptyState
           title="Nenhum enxame formado"
-          body="Aprove um cartão em Aguardando aprovação para disparar o Ruflo stub."
+          body="Aprove um cartão em Aguardando aprovação para disparar o enxame de agentes."
         />
       ) : (
         <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
